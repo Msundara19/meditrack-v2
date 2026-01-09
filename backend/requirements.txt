@@ -8,7 +8,7 @@ numpy>=2.0.0
 Pillow==11.0.0
 
 # LLM Integration
-groq==0.11.0
+groq==0.13.0
 google-generativeai==0.8.3
 
 # Database
