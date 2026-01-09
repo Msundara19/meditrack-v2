@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediTrack - AI Wound Healing Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f7fa;
+            color: #4a5568;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 400;
+            color: #1a1a1a;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            color: #718096;
+            font-size: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .emergency-banner {
+            background-color: #fef3c7;
+            border: 1px solid #fcd34d;
+            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            margin-bottom: 2rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #4a5568;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+        }
+
+        .file-upload {
+            border: 2px dashed #cbd5e0;
+            border-radius: 12px;
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background-color: #f7fafc;
+        }
+
+        .file-upload:hover {
+            border-color: #007bff;
+            background-color: #ebf8ff;
+        }
+
+        .file-upload.dragover {
+            border-color: #007bff;
+            background-color: #ebf8ff;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+        }
+
+        .btn-primary:hover {
+            background-color: #0056b3;
+            box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:disabled {
+            background-color: #cbd5e0;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #preview {
+            max-width: 100%;
+            border-radius: 8px;
+            margin-top: 1rem;
+            display: none;
+        }
+
+        #results {
+            display: none;
+        }
+
+        .risk-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            margin: 1rem 0;
+        }
+
+        .risk-high {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .risk-medium {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        .risk-low {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .wound-type-badge {
+            background-color: #ebf8ff;
+            color: #1565c0;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 500;
+            display: inline-block;
+            margin: 0.5rem 0;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .metric-card {
+            background-color: #f7fafc;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            text-align: center;
+        }
+
+        .metric-label {
+            color: #718096;
+            font-size: 0.875rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .metric-value {
+            color: #1a1a1a;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .info-box {
+            background-color: #ebf8ff;
+            border-left: 4px solid #007bff;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }
+
+        .warning-box {
+            background-color: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        footer {
+            text-align: center;
+            color: #a0aec0;
+            font-size: 0.875rem;
+            padding: 2rem 0;
+            border-top: 1px solid #e2e8f0;
+            margin-top: 3rem;
+        }
+
+        @media (max-width: 640px) {
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🩹 MediTrack</h1>
+            <p class="subtitle">AI-Powered Wound Healing Monitor with Classification</p>
+        </header>
+
+        <div class="emergency-banner">
+            ⚠️ <strong>If this is an emergency, call 911 or your local emergency number.</strong>
+        </div>
+
+        <div class="card">
+            <h2>Upload Wound Image</h2>
+            <p style="color: #718096; margin-bottom: 1.5rem;">
+                Take a clear photo of the wound in good lighting. Include a reference object (coin/ruler) if possible.
+            </p>
+
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label for="patientId">Patient ID</label>
+                    <input type="text" id="patientId" value="patient_demo" required>
+                </div>
+
+                <div class="form-group">
+                    <div class="file-upload" id="fileUpload">
+                        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/jpg" required>
+                        <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">📤 Drag and drop file here</p>
+                        <p style="color: #718096; font-size: 0.875rem;">or click to browse</p>
+                        <p style="color: #a0aec0; font-size: 0.75rem; margin-top: 0.5rem;">
+                            Limit 10MB per file • JPG, PNG
+                        </p>
+                    </div>
+                    <img id="preview" alt="Preview">
+                </div>
+
+                <button type="submit" class="btn-primary" id="analyzeBtn">
+                    🔍 Analyze Wound
+                </button>
+            </form>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>⏳ Analyzing wound with AI classification...</p>
+            <p style="color: #718096; font-size: 0.875rem;">This may take 10-20 seconds</p>
+        </div>
+
+        <div id="results" class="card">
+            <h2>📋 Analysis Results</h2>
+            
+            <div style="text-align: center; margin: 1.5rem 0;">
+                <span class="risk-badge" id="riskBadge"></span>
+            </div>
+
+            <div id="woundTypeBadgeContainer" style="text-align: center; display: none;">
+                <span class="wound-type-badge" id="woundTypeBadge"></span>
+            </div>
+
+            <h3 style="margin-top: 2rem; margin-bottom: 1rem;">📏 Key Metrics</h3>
+            <div class="metrics-grid" id="metricsGrid"></div>
+
+            <h3 style="margin-top: 2rem; margin-bottom: 0.5rem;">🤖 AI Assessment</h3>
+            <div class="info-box" id="aiSummary"></div>
+
+            <h3 style="margin-top: 2rem; margin-bottom: 0.5rem;">💡 Care Recommendations</h3>
+            <div class="warning-box" id="recommendations"></div>
+
+            <button class="btn-primary" onclick="resetForm()" style="margin-top: 2rem;">
+                📸 Analyze Another Image
+            </button>
+        </div>
+
+        <footer>
+            MediTrack v2.0 | Multi-Factor Wound Classification | Educational Project<br>
+            <small>Not for clinical use • Always consult healthcare professionals</small>
+        </footer>
+    </div>
+
+    <script>
+        // Configuration - Update this after backend deployment
+        const API_URL = 'http://localhost:8000'; // Change to production URL after deployment
+
+        const fileUpload = document.getElementById('fileUpload');
+        const fileInput = document.getElementById('fileInput');
+        const preview = document.getElementById('preview');
+        const uploadForm = document.getElementById('uploadForm');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+
+        // File upload handling
+        fileUpload.addEventListener('click', () => fileInput.click());
+
+        fileUpload.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileUpload.classList.add('dragover');
+        });
+
+        fileUpload.addEventListener('dragleave', () => {
+            fileUpload.classList.remove('dragover');
+        });
+
+        fileUpload.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileUpload.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                previewImage(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                previewImage(e.target.files[0]);
+            }
+        });
+
+        function previewImage(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Form submission
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const patientId = document.getElementById('patientId').value;
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select an image file');
+                return;
+            }
+
+            // Show loading
+            uploadForm.style.display = 'none';
+            loading.style.display = 'block';
+            results.style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('patient_id', patientId);
+
+                const response = await fetch(`${API_URL}/api/wounds/analyze`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Analysis failed: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                displayResults(data);
+
+            } catch (error) {
+                alert(`Error: ${error.message}\n\nMake sure the backend server is running.`);
+                uploadForm.style.display = 'block';
+                loading.style.display = 'none';
+            }
+        });
+
+        function displayResults(data) {
+            const { metrics, analysis } = data;
+
+            // Risk badge
+            const riskBadge = document.getElementById('riskBadge');
+            riskBadge.textContent = `${analysis.risk_level.toUpperCase()} RISK`;
+            riskBadge.className = `risk-badge risk-${analysis.risk_level}`;
+
+            // Wound type badge
+            if (metrics.wound_type && metrics.wound_type !== 'unknown') {
+                const woundTypeBadge = document.getElementById('woundTypeBadge');
+                const woundTypeDisplay = metrics.wound_type.replace(/_/g, ' ')
+                    .split(' ')
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(' ');
+                woundTypeBadge.textContent = `🔬 Wound Type: ${woundTypeDisplay}`;
+                document.getElementById('woundTypeBadgeContainer').style.display = 'block';
+            }
+
+            // Metrics
+            const metricsGrid = document.getElementById('metricsGrid');
+            metricsGrid.innerHTML = '';
+
+            const metricsToShow = [
+                { label: 'Healing Score', value: `${metrics.healing_score}/100` },
+                { 
+                    label: metrics.measurement_type === 'linear' ? 'Length' : 'Area',
+                    value: metrics.measurement_type === 'linear' && metrics.length_cm
+                        ? `${metrics.length_cm.toFixed(1)} cm`
+                        : `${metrics.wound_area_cm2.toFixed(1)} cm²`
+                },
+                { 
+                    label: metrics.measurement_type === 'linear' && metrics.width_cm ? 'Width' : 'Redness',
+                    value: metrics.measurement_type === 'linear' && metrics.width_cm
+                        ? `${metrics.width_cm.toFixed(1)} cm`
+                        : metrics.redness_index.toFixed(2)
+                },
+                { 
+                    label: metrics.aspect_ratio ? 'Aspect Ratio' : 'Edge Quality',
+                    value: metrics.aspect_ratio 
+                        ? metrics.aspect_ratio.toFixed(1)
+                        : metrics.edge_sharpness.toFixed(2)
+                }
+            ];
+
+            metricsToShow.forEach(metric => {
+                const metricCard = document.createElement('div');
+                metricCard.className = 'metric-card';
+                metricCard.innerHTML = `
+                    <div class="metric-label">${metric.label}</div>
+                    <div class="metric-value">${metric.value}</div>
+                `;
+                metricsGrid.appendChild(metricCard);
+            });
+
+            // AI Summary
+            document.getElementById('aiSummary').textContent = analysis.summary;
+
+            // Recommendations
+            document.getElementById('recommendations').textContent = analysis.recommendations;
+
+            // Show results
+            loading.style.display = 'none';
+            results.style.display = 'block';
+        }
+
+        function resetForm() {
+            uploadForm.reset();
+            preview.style.display = 'none';
+            uploadForm.style.display = 'block';
+            results.style.display = 'none';
+            document.getElementById('woundTypeBadgeContainer').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
