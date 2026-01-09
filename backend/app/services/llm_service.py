@@ -22,7 +22,7 @@ class LLMAnalyzer:
     - Google Gemini as fallback provider
     
     Generates:
-    - Patient-friendly summaries
+    - Patient-friendly summaries (in everyday language)
     - Risk assessment
     - Care recommendations
     """
@@ -77,8 +77,8 @@ class LLMAnalyzer:
         # Assess risk level using rule-based logic
         risk_level = self._assess_risk(area_cm2, redness_index, healing_score)
         
-        # Build prompt for LLM
-        prompt = self._build_prompt(
+        # Build patient-friendly prompt for LLM
+        prompt = self._build_patient_friendly_prompt(
             area_cm2=area_cm2,
             redness_index=redness_index,
             edge_sharpness=edge_sharpness,
@@ -99,7 +99,7 @@ class LLMAnalyzer:
             except Exception as e2:
                 logger.error(f"Both LLM providers failed: {e2}")
                 summary = self._generate_fallback_summary(
-                    area_cm2, redness_index, healing_score, risk_level
+                    area_cm2, redness_index, healing_score, risk_level, previous_metrics
                 )
         
         # Generate recommendations based on risk level
@@ -157,7 +157,7 @@ class LLMAnalyzer:
         else:
             return "low"
     
-    def _build_prompt(
+    def _build_patient_friendly_prompt(
         self,
         area_cm2: float,
         redness_index: float,
@@ -167,7 +167,7 @@ class LLMAnalyzer:
         previous_metrics: Optional[Dict]
     ) -> str:
         """
-        Build prompt for LLM analysis
+        Build patient-friendly prompt for LLM analysis (NO TECHNICAL JARGON)
         
         Args:
             area_cm2: Wound area
@@ -180,14 +180,20 @@ class LLMAnalyzer:
         Returns:
             Formatted prompt string
         """
-        prompt = f"""You are a medical AI assistant helping patients monitor their post-surgical wounds. Provide a brief, reassuring, and informative assessment.
+        # Convert technical metrics to everyday language
+        size_description = self._describe_size(area_cm2)
+        size_comparison = self._size_comparison(area_cm2)
+        inflammation_level = self._describe_inflammation(redness_index)
+        healing_quality = self._describe_healing(healing_score)
+        
+        prompt = f"""You are a caring, warm healthcare professional talking to a patient about their healing wound. Use simple, everyday language - NO medical jargon or technical measurements.
 
-**Current Wound Metrics:**
-- Wound area: {area_cm2:.2f} cm²
-- Redness/inflammation index: {redness_index:.3f} (scale: 0=minimal, 1=high)
-- Edge sharpness: {edge_sharpness:.3f} (higher=better defined boundary)
-- Overall healing score: {healing_score:.1f}/100
-- Risk assessment: {risk_level.upper()}
+**Current Situation (DO NOT mention these numbers directly to the patient):**
+- Size: {size_description} (approximately {size_comparison})
+- Inflammation: {inflammation_level} redness
+- Healing progress: The wound is healing {healing_quality}
+- Overall score: {healing_score}/100
+- Risk level: {risk_level}
 
 """
         
@@ -199,39 +205,102 @@ class LLMAnalyzer:
             area_change = area_cm2 - prev_area
             score_change = healing_score - prev_score
             
-            trend = "improving" if score_change > 0 else "stable" if score_change == 0 else "needs attention"
+            if area_change < -2:
+                prompt += f"**Good News:** The wound is getting smaller since last time (healing well).\n"
+            elif area_change > 2:
+                prompt += f"**Note:** The wound has grown slightly since last time. This needs attention.\n"
             
-            prompt += f"""**Comparison with Previous Scan:**
-- Previous area: {prev_area:.2f} cm²
-- Area change: {area_change:+.2f} cm² ({("shrinking" if area_change < 0 else "expanding")})
-- Healing score change: {score_change:+.1f} points
-- Overall trend: {trend}
-
-"""
+            if score_change > 10:
+                prompt += f"**Progress:** Healing is improving compared to last scan.\n"
+            elif score_change < -10:
+                prompt += f"**Concern:** Healing has slowed down since last time.\n"
         
-        prompt += """**Please provide:**
+        prompt += """
+**Your Task:** Write a brief, warm message (2-3 sentences maximum) that:
 
-1. **Brief Assessment** (2-3 sentences):
-   - What do these numbers mean in plain language?
-   - Is this normal healing progression?
+1. Explains how the wound is doing in PLAIN ENGLISH
+   - Use phrases like "about the size of..." not "6907.2 cm²"
+   - Say "healing well" not "healing score of 17/100"
+   - Say "some redness" not "redness index 0.58"
 
-2. **What to Watch For** (1-2 key points):
-   - Specific signs that would indicate a problem
-   - When changes are expected
+2. Sounds like a caring doctor talking to their patient
+   - Warm, reassuring tone
+   - Be honest but not scary
+   - No medical terminology
 
-3. **Next Steps** (brief):
-   - Should they continue routine care?
-   - Do they need to contact their provider?
+3. Gives clear next steps
+   - "Keep doing what you're doing" OR
+   - "Let's have your doctor take a look"
 
-Keep your response:
-- Under 150 words total
-- Patient-friendly (no medical jargon)
-- Honest but not alarming
-- Actionable and specific
+EXAMPLES OF GOOD RESPONSES:
+- "Your wound, which is about the size of your palm, is healing steadily. There's a bit of redness, which is normal at this stage. Keep it clean and dry, and continue with your current care routine."
 
-Remember: This is for patient education, not diagnosis. Always encourage appropriate medical consultation."""
+- "I can see your wound is making good progress - it's gotten smaller since last time! The redness has decreased too, which means the inflammation is going down. You're doing great with your care."
+
+- "Your wound is larger than we'd like to see at this stage, and there's noticeable redness around it. I recommend checking in with your doctor in the next day or two to make sure everything is on track."
+
+AVOID SAYING:
+- Technical measurements like "6907.2 cm²" or "healing score 17/100"
+- Medical jargon like "inflammation index" or "tissue granulation"
+- Scary phrases like "HIGH RISK" (say "needs attention" instead)
+
+Write your warm, patient-friendly assessment now:"""
         
         return prompt
+    
+    def _describe_size(self, area_cm2: float) -> str:
+        """Describe wound size in simple terms"""
+        if area_cm2 < 1:
+            return "very small"
+        elif area_cm2 < 5:
+            return "small"
+        elif area_cm2 < 15:
+            return "medium-sized"
+        elif area_cm2 < 50:
+            return "moderately large"
+        else:
+            return "large"
+    
+    def _size_comparison(self, area_cm2: float) -> str:
+        """Compare wound size to everyday objects"""
+        if area_cm2 < 1:
+            return "smaller than a dime"
+        elif area_cm2 < 3:
+            return "about the size of a quarter"
+        elif area_cm2 < 10:
+            return "roughly the size of a credit card"
+        elif area_cm2 < 25:
+            return "about the size of a Post-it note"
+        elif area_cm2 < 50:
+            return "about the size of your palm"
+        elif area_cm2 < 100:
+            return "roughly the size of your hand"
+        else:
+            return "larger than your hand"
+    
+    def _describe_inflammation(self, redness_index: float) -> str:
+        """Describe inflammation in patient-friendly terms"""
+        if redness_index < 0.3:
+            return "minimal"
+        elif redness_index < 0.5:
+            return "mild"
+        elif redness_index < 0.7:
+            return "moderate"
+        else:
+            return "significant"
+    
+    def _describe_healing(self, healing_score: float) -> str:
+        """Describe healing progress in simple terms"""
+        if healing_score >= 80:
+            return "very well"
+        elif healing_score >= 60:
+            return "well"
+        elif healing_score >= 40:
+            return "at a moderate pace"
+        elif healing_score >= 20:
+            return "slowly"
+        else:
+            return "more slowly than expected"
     
     def _call_groq(self, prompt: str) -> str:
         """
@@ -254,15 +323,15 @@ Remember: This is for patient education, not diagnosis. Always encourage appropr
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful medical AI assistant providing wound care guidance."
+                    "content": "You are a warm, caring healthcare professional who explains medical information in simple, everyday language. Never use technical jargon or measurements when talking to patients."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            temperature=0.3,  # Lower temperature for more consistent medical advice
-            max_tokens=300,
+            temperature=0.7,  # Higher for more natural, conversational tone
+            max_tokens=200,   # Shorter responses (2-3 sentences)
             top_p=0.9
         )
         
@@ -287,8 +356,8 @@ Remember: This is for patient education, not diagnosis. Always encourage appropr
         response = self.gemini_model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=300,
+                temperature=0.7,
+                max_output_tokens=200,
             )
         )
         
@@ -299,38 +368,48 @@ Remember: This is for patient education, not diagnosis. Always encourage appropr
         area_cm2: float,
         redness: float,
         healing_score: float,
-        risk_level: str
+        risk_level: str,
+        previous_metrics: Optional[Dict] = None
     ) -> str:
         """
-        Generate rule-based summary if LLM APIs fail
+        Generate patient-friendly rule-based summary if LLM APIs fail
         
         Args:
             area_cm2: Wound area
             redness: Redness index
             healing_score: Healing score
             risk_level: Risk level
+            previous_metrics: Previous scan data
             
         Returns:
-            Generated summary
+            Generated summary in plain language
         """
-        summary = f"Your wound measures {area_cm2:.1f} cm² with a healing score of {healing_score:.0f}/100. "
+        size_desc = self._size_comparison(area_cm2)
+        healing_desc = self._describe_healing(healing_score)
         
-        if healing_score >= 70:
-            summary += "Your wound appears to be healing well. "
-        elif healing_score >= 40:
-            summary += "Your wound is showing moderate healing progress. "
-        else:
-            summary += "Your wound healing may need closer attention. "
+        summary = f"Your wound, which is {size_desc}, is healing {healing_desc}. "
         
-        if redness > 0.6:
-            summary += "There is noticeable redness which could indicate inflammation. "
+        # Add context from previous scan if available
+        if previous_metrics:
+            prev_area = previous_metrics.get('area_cm2', area_cm2)
+            if prev_area > area_cm2 + 2:
+                summary += "Good news - it's getting smaller! "
+            elif prev_area < area_cm2 - 2:
+                summary += "It's grown a bit since last time, which needs attention. "
         
+        # Add inflammation context
+        if redness > 0.65:
+            summary += "There's noticeable redness around the area. "
+        elif redness < 0.4:
+            summary += "The redness is minimal, which is a good sign. "
+        
+        # Add action based on risk
         if risk_level == "high":
-            summary += "Based on these metrics, we recommend contacting your healthcare provider for evaluation."
+            summary += "I recommend having your doctor take a look within the next day or two to make sure everything is on track."
         elif risk_level == "medium":
-            summary += "Continue monitoring and contact your provider if you notice any worsening."
+            summary += "Keep monitoring it closely, and reach out to your doctor if you notice any changes or if it doesn't improve in the next few days."
         else:
-            summary += "Continue your current wound care routine."
+            summary += "Keep doing what you're doing with your wound care routine - you're on the right track!"
         
         return summary
     
@@ -341,7 +420,7 @@ Remember: This is for patient education, not diagnosis. Always encourage appropr
         area_cm2: float
     ) -> str:
         """
-        Generate standardized care recommendations
+        Generate patient-friendly care recommendations
         
         Args:
             risk_level: Risk assessment level
@@ -349,16 +428,18 @@ Remember: This is for patient education, not diagnosis. Always encourage appropr
             area_cm2: Wound area
             
         Returns:
-            Recommendation text
+            Recommendation text in plain language
         """
-        base_care = "Keep the wound clean and dry. Follow your provider's dressing change instructions."
+        recommendations = []
         
-        recommendations = [base_care]
+        # Basic care
+        recommendations.append("Keep the wound clean and dry.")
+        recommendations.append("Follow your provider's dressing change instructions.")
         
         # Add specific recommendations based on metrics
         if redness > 0.6:
             recommendations.append(
-                "Monitor for signs of infection: increased warmth, swelling, or discharge."
+                "Watch for signs like increased warmth, swelling, or discharge."
             )
         
         if area_cm2 > 15:
@@ -373,11 +454,11 @@ Remember: This is for patient education, not diagnosis. Always encourage appropr
             )
         elif risk_level == "medium":
             recommendations.append(
-                "Contact your provider if symptoms worsen or don't improve in 2-3 days."
+                "Contact your provider if things don't improve in the next 2-3 days."
             )
         else:
             recommendations.append(
-                "Continue monitoring. Contact your provider if you have concerns."
+                "Continue your current care. Reach out to your provider if you have any concerns."
             )
         
         return " ".join(recommendations)
