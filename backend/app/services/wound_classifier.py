@@ -1,11 +1,15 @@
 """
 Advanced wound classification system
-Uses multiple features for robust wound type detection
+Uses multiple features for robust wound type detection.
+
+When an ML model checkpoint is available (models/wound_classifier.pt), the
+WoundClassifier defers classification to it and keeps the heuristic pipeline
+as a fallback.  See ml_classifier.py for model training / inference details.
 """
 import cv2
 import numpy as np
-from typing import Tuple
-from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+from dataclasses import dataclass, field
 from enum import Enum
 import logging
 
@@ -52,6 +56,11 @@ class WoundFeatures:
     # Wound type
     wound_type: str
     measurement_type: str  # "area" or "linear"
+
+    # ML classifier outputs (populated when model is available)
+    confidence_scores: Optional[Dict[str, float]] = field(default=None)
+    ml_confidence: Optional[float] = field(default=None)
+    classified_by: str = field(default="heuristic")  # "ml" | "heuristic"
 
 
 class WoundClassifier:
