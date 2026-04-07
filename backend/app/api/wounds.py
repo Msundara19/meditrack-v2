@@ -2,16 +2,20 @@
 Wound Analysis API Endpoints
 """
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Form
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
+import io
 import uuid
 import shutil
+import numpy as np
 from datetime import datetime
 import logging
 
 from app.database import get_db
 from app.services.cv_service import WoundAnalyzer
 from app.services.llm_service import get_llm_analyzer
+from app.services.report_service import generate_scan_report
 from app import schemas, models
 from app.config import settings
 
@@ -261,13 +265,16 @@ async def get_patient_history(
         return {
             "patient_id": patient_id,
             "scan_count": 0,
-            "scans": []
+            "scans": [],
+            "healing_trajectory": {"available": False, "reason": "No scans found"},
         }
-    
+
+    scans_data = [scan.to_dict() for scan in scans]
     return {
         "patient_id": patient_id,
         "scan_count": len(scans),
-        "scans": [scan.to_dict() for scan in scans]
+        "scans": scans_data,
+        "healing_trajectory": _predict_healing_trajectory(scans_data),
     }
 
 
@@ -344,6 +351,108 @@ async def delete_scan(
     
     return {
         "message": f"Scan {scan_id} deleted successfully"
+    }
+
+
+@router.get("/{scan_id}/image")
+async def get_scan_image(scan_id: str, db: Session = Depends(get_db)):
+    """Serve the original wound image for a scan."""
+    scan = db.query(schemas.WoundScan).filter(schemas.WoundScan.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+    image_path = Path(scan.image_path)
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail="Image file not found")
+    return FileResponse(str(image_path), media_type="image/jpeg")
+
+
+@router.get("/{scan_id}/annotated")
+async def get_annotated_image(scan_id: str, db: Session = Depends(get_db)):
+    """Serve the annotated wound image for a scan."""
+    scan = db.query(schemas.WoundScan).filter(schemas.WoundScan.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+    image_path = Path(scan.image_path)
+    annotated_path = image_path.parent / f"{scan_id}_annotated{image_path.suffix}"
+    if not annotated_path.exists():
+        # Fall back to original if annotated not found
+        if not image_path.exists():
+            raise HTTPException(status_code=404, detail="Image file not found")
+        return FileResponse(str(image_path), media_type="image/jpeg")
+    return FileResponse(str(annotated_path), media_type="image/jpeg")
+
+
+@router.get("/{scan_id}/report")
+async def download_report(scan_id: str, db: Session = Depends(get_db)):
+    """Generate and download a PDF report for a scan."""
+    scan = db.query(schemas.WoundScan).filter(schemas.WoundScan.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+
+    scan_data = scan.to_dict()
+    scan_data["id"] = scan.id
+
+    image_path = Path(scan.image_path)
+    annotated_path = image_path.parent / f"{scan_id}_annotated{image_path.suffix}"
+
+    try:
+        pdf_bytes = generate_scan_report(
+            scan_data,
+            annotated_image_path=str(annotated_path) if annotated_path.exists() else None,
+        )
+    except Exception as e:
+        logger.error(f"PDF generation failed for scan {scan_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=meditrack_report_{scan_id[:8]}.pdf"},
+    )
+
+
+def _predict_healing_trajectory(scans: list) -> dict:
+    """
+    Predict healing trajectory from chronological scan history.
+    Uses linear regression on healing scores to estimate scans until good healing.
+    """
+    if len(scans) < 2:
+        return {"available": False, "reason": "Need at least 2 scans for prediction"}
+
+    # scans are newest-first; reverse for chronological order
+    scores = [s["metrics"]["healing_score"] for s in reversed(scans)]
+    x = np.arange(len(scores), dtype=float)
+    slope, intercept = np.polyfit(x, scores, 1)
+
+    current = scores[-1]
+
+    if slope <= 0:
+        return {
+            "available": True,
+            "trend": "declining",
+            "slope_per_scan": round(float(slope), 2),
+            "current_score": round(current, 1),
+            "message": "Healing score is not improving. Consider consulting a healthcare provider.",
+        }
+
+    target = 85.0
+    if current >= target:
+        return {
+            "available": True,
+            "trend": "good",
+            "slope_per_scan": round(float(slope), 2),
+            "current_score": round(current, 1),
+            "message": "Wound is healing well (score ≥ 85).",
+        }
+
+    scans_needed = int(round((target - current) / slope))
+    return {
+        "available": True,
+        "trend": "improving",
+        "slope_per_scan": round(float(slope), 2),
+        "current_score": round(current, 1),
+        "scans_to_target": scans_needed,
+        "message": f"At current rate, ~{scans_needed} more scan(s) to reach good healing (score ≥ 85).",
     }
 
 
