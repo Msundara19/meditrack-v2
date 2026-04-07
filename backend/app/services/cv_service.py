@@ -95,18 +95,19 @@ class WoundAnalyzer:
         
         logger.info(f"Analyzing image: {image_path} (shape: {image.shape})")
         
-        # Preprocessing
+        # Preprocessing — may resize image to max 1024px.
+        # ALL subsequent operations must use `preprocessed`, not `image`,
+        # so that the mask and the image it is applied to are always the same size.
         preprocessed = self._preprocess(image)
-        
-        # Segmentation
+
+        # Segmentation — mask is at preprocessed resolution
         mask = self._segment_wound(preprocessed)
-        
-        # Classify wound type and extract enhanced features
-        wound_features = self.classifier.classify_and_extract_features(mask, image)
+
+        # Classify wound type using the preprocessed image (same size as mask)
+        wound_features = self.classifier.classify_and_extract_features(mask, preprocessed)
 
         # --- ML classifier override ---
-        # Run the trained EfficientNet-B0 on the raw image.  If the model is
-        # available and confident, override the heuristic prediction.
+        # EfficientNet-B0 reads the file directly so resolution mismatch doesn't apply.
         ml_clf = get_ml_classifier()
         if ml_clf.is_available():
             try:
@@ -128,11 +129,11 @@ class WoundAnalyzer:
                     )
             except Exception as exc:
                 logger.warning(f"ML classifier error, using heuristic fallback: {exc}")
-        
+
         # Find contours for visualization
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Calculate basic metrics
+
+        # Calculate basic metrics — all use `preprocessed` to match mask dimensions
         area_pixels = np.sum(mask > 0)
 
         # Guard: if segmentation found nothing, the image likely has no visible wound
@@ -143,12 +144,12 @@ class WoundAnalyzer:
             )
 
         area_cm2 = area_pixels * (self.calibration_factor ** 2)
-        redness_index = self._calculate_redness(image, mask)
+        redness_index = self._calculate_redness(preprocessed, mask)
         edge_sharpness = self._calculate_edge_sharpness(mask)
         healing_score = self._calculate_healing_score(area_cm2, redness_index, edge_sharpness)
-        
-        # Create annotated visualization
-        annotated = self._create_annotated_image(image, mask, contours, wound_features)
+
+        # Create annotated visualization using preprocessed image (same size as mask)
+        annotated = self._create_annotated_image(preprocessed, mask, contours, wound_features)
         
         logger.info(f"Analysis complete: type={wound_features.wound_type}, "
                    f"area={area_cm2:.2f}cm², redness={redness_index:.3f}, "
