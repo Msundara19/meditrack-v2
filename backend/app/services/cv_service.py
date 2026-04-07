@@ -58,21 +58,38 @@ class WoundAnalyzer:
         self.classifier = WoundClassifier(calibration_factor)
         logger.info(f"WoundAnalyzer initialized with calibration factor: {calibration_factor}")
     
+    def _load_image(self, image_path: str) -> np.ndarray:
+        """
+        Load image with EXIF orientation correction.
+
+        Phone cameras embed rotation in EXIF data that OpenCV ignores, causing
+        wound images to appear sideways/upside-down. PIL's exif_transpose fixes this.
+        Falls back to plain cv2.imread if PIL is unavailable or EXIF read fails.
+        """
+        try:
+            from PIL import Image as PILImage, ImageOps
+            pil_img = PILImage.open(image_path)
+            pil_img = ImageOps.exif_transpose(pil_img)   # apply EXIF rotation
+            img_rgb = np.array(pil_img.convert("RGB"))
+            return cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        except Exception:
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Failed to load image from {image_path}")
+            return image
+
     def analyze_wound(self, image_path: str) -> WoundMetrics:
         """
-        Complete wound analysis pipeline with classification
-        
-        Args:
-            image_path: Path to wound image
-            
-        Returns:
-            WoundMetrics object with all analysis results including wound type
-            
-        Raises:
-            ValueError: If image cannot be loaded or processed
+        Complete wound analysis pipeline with classification.
+
+        Raises
+        ------
+        ValueError
+            If the image cannot be loaded, is unreadable, or contains no
+            detectable wound region.
         """
-        # Load image
-        image = cv2.imread(image_path)
+        # Load with EXIF rotation fix
+        image = self._load_image(image_path)
         if image is None:
             raise ValueError(f"Failed to load image from {image_path}")
         
@@ -117,6 +134,14 @@ class WoundAnalyzer:
         
         # Calculate basic metrics
         area_pixels = np.sum(mask > 0)
+
+        # Guard: if segmentation found nothing, the image likely has no visible wound
+        if area_pixels == 0:
+            raise ValueError(
+                "No wound region detected. Ensure the wound is clearly visible, "
+                "well-lit, and not obscured by clothing or bandages."
+            )
+
         area_cm2 = area_pixels * (self.calibration_factor ** 2)
         redness_index = self._calculate_redness(image, mask)
         edge_sharpness = self._calculate_edge_sharpness(mask)
@@ -339,6 +364,10 @@ class WoundAnalyzer:
         Returns:
             Healing score (0-100)
         """
+        # Guard: zero area means no wound detected — should have been caught earlier
+        if area_cm2 == 0.0:
+            return 0.0
+
         # Normalize area (assume max wound size is 50 cm²)
         max_area = 50.0
         area_score = max(0.0, 1.0 - (area_cm2 / max_area))
