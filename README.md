@@ -11,8 +11,9 @@ An advanced wound analysis system using computer vision and LLMs to classify wou
 ## ✨ Features
 
 ### 🔬 Multi-Factor Wound Classification
-- **7 Wound Types Detected**: Surgical incisions, lacerations, burns, pressure ulcers, diabetic ulcers, abrasions, punctures
-- **6+ Classification Features**: Aspect ratio, circularity, solidity, edge smoothness, straight edge detection, suture detection
+- **7 Wound Types Detected**: Surgical incisions, lacerations, burns, pressure ulcers, diabetic ulcers, abrasions, venous ulcers
+- **Trained ML Model**: EfficientNet-B0 fine-tuned on wound images — 91.5% test accuracy, 0.989 macro AUC
+- **Heuristic Fallback**: Rule-based classifier (aspect ratio, circularity, solidity, suture detection) used when ML confidence < 60%
 - **Smart Measurements**: Automatic detection of measurement type (linear vs area-based)
 
 ### 🤖 AI-Powered Analysis
@@ -118,8 +119,9 @@ streamlit run app.py
    - Suture detection (blue/dark color ranges)
 
 4. **Classification**
-   - Multi-factor decision tree
-   - Threshold-based rules optimized for clinical accuracy
+   - Primary: EfficientNet-B0 ML model (91.5% accuracy, 0.989 AUC) trained on 7 wound classes
+   - Fallback: Multi-factor heuristic decision tree (used when ML confidence < 60%)
+   - API response includes `classified_by`, `ml_confidence`, and per-class `confidence_scores`
 
 ### LLM Integration
 
@@ -130,7 +132,24 @@ streamlit run app.py
 
 ---
 
-## 📊 Wound Classification Rules
+## 📊 Wound Classification
+
+### ML Model Performance (Test Set, 375 samples)
+
+| Wound Type | Precision | Recall | F1 |
+|------------|-----------|--------|----|
+| Surgical Incision | 0.98 | 0.83 | 0.90 |
+| Laceration | 1.00 | 0.94 | 0.97 |
+| Burn | 0.90 | 0.95 | 0.93 |
+| Pressure Ulcer | 0.90 | 0.91 | 0.91 |
+| Diabetic Ulcer | 0.82 | 0.88 | 0.85 |
+| Abrasion | 0.96 | 1.00 | 0.98 |
+| Venous Ulcer | 0.92 | 0.97 | 0.95 |
+| **Overall** | **0.93** | **0.93** | **0.93** |
+
+Overall accuracy: 91.5% — Macro AUC: 0.989
+
+### Heuristic Fallback Rules
 
 | Wound Type | Key Features | Measurement |
 |------------|--------------|-------------|
@@ -140,7 +159,7 @@ streamlit run app.py
 | **Pressure Ulcer** | Large (>15cm²), irregular, low solidity | Area |
 | **Diabetic Ulcer** | Medium size, circular (>0.65) | Area |
 | **Abrasion** | Shallow, irregular | Area |
-| **Puncture** | Small (<2cm²), circular | Area |
+| **Venous Ulcer** | Default fallback | Area |
 
 ---
 
@@ -150,8 +169,9 @@ streamlit run app.py
 - FastAPI 0.115.0
 - OpenCV 4.10.0
 - SQLAlchemy 2.0.36
-- Groq SDK 0.11.0
+- Groq SDK 0.13.0
 - Google Generative AI 0.8.3
+- PyTorch + timm (EfficientNet-B0 inference)
 
 **Frontend:**
 - Streamlit 1.40.0
