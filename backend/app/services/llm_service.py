@@ -56,59 +56,54 @@ class LLMAnalyzer:
         redness_index: float,
         edge_sharpness: float,
         healing_score: float,
-        previous_metrics: Optional[Dict] = None
+        wound_type: str = "unknown",
+        classified_by: str = "heuristic",
+        previous_metrics: Optional[Dict] = None,
     ) -> Dict[str, str]:
         """
-        Generate comprehensive wound analysis
-        
-        Args:
-            area_cm2: Wound area in cm²
-            redness_index: Redness/inflammation metric (0-1)
-            edge_sharpness: Edge definition quality (0-1)
-            healing_score: Composite healing score (0-100)
-            previous_metrics: Optional previous scan for comparison
-            
-        Returns:
-            Dictionary with:
-            - risk_level: "low", "medium", or "high"
-            - summary: Patient-friendly analysis
-            - recommendations: Care instructions
+        Generate comprehensive wound analysis using Groq (Llama 3.1).
+
+        Parameters
+        ----------
+        wound_type : str
+            Classified wound type (e.g. "pressure_ulcer"). Passed to the LLM
+            so it can give wound-specific, contextually appropriate advice.
+        classified_by : str
+            "ml" or "heuristic" — informs confidence wording in the prompt.
         """
-        # Assess risk level using rule-based logic
         risk_level = self._assess_risk(area_cm2, redness_index, healing_score)
-        
-        # Build patient-friendly prompt for LLM
+
         prompt = self._build_patient_friendly_prompt(
             area_cm2=area_cm2,
             redness_index=redness_index,
             edge_sharpness=edge_sharpness,
             healing_score=healing_score,
             risk_level=risk_level,
-            previous_metrics=previous_metrics
+            wound_type=wound_type,
+            classified_by=classified_by,
+            previous_metrics=previous_metrics,
         )
-        
-        # Try Groq first, fallback to Gemini
+
         try:
             summary = self._call_groq(prompt)
-            logger.info("Generated analysis using Groq")
+            logger.info(f"Groq analysis generated for wound_type={wound_type}")
         except Exception as e:
             logger.warning(f"Groq failed: {e}, trying Gemini...")
             try:
                 summary = self._call_gemini(prompt)
-                logger.info("Generated analysis using Gemini")
+                logger.info("Gemini fallback used")
             except Exception as e2:
                 logger.error(f"Both LLM providers failed: {e2}")
                 summary = self._generate_fallback_summary(
                     area_cm2, redness_index, healing_score, risk_level, previous_metrics
                 )
-        
-        # Generate recommendations based on risk level
-        recommendations = self._generate_recommendations(risk_level, redness_index, area_cm2)
-        
+
+        recommendations = self._generate_recommendations(risk_level, redness_index, area_cm2, wound_type)
+
         return {
             "risk_level": risk_level,
             "summary": summary,
-            "recommendations": recommendations
+            "recommendations": recommendations,
         }
     
     def _assess_risk(self, area_cm2: float, redness: float, healing_score: float) -> str:
@@ -164,7 +159,9 @@ class LLMAnalyzer:
         edge_sharpness: float,
         healing_score: float,
         risk_level: str,
-        previous_metrics: Optional[Dict]
+        wound_type: str = "unknown",
+        classified_by: str = "heuristic",
+        previous_metrics: Optional[Dict] = None,
     ) -> str:
         """
         Build patient-friendly prompt for LLM analysis (NO TECHNICAL JARGON)
@@ -180,18 +177,32 @@ class LLMAnalyzer:
         Returns:
             Formatted prompt string
         """
-        # Convert technical metrics to everyday language
-        size_description = self._describe_size(area_cm2)
-        size_comparison = self._size_comparison(area_cm2)
+        size_description  = self._describe_size(area_cm2)
+        size_comparison   = self._size_comparison(area_cm2)
         inflammation_level = self._describe_inflammation(redness_index)
-        healing_quality = self._describe_healing(healing_score)
-        
-        prompt = f"""You are a caring, warm healthcare professional talking to a patient about their healing wound. Use simple, everyday language - NO medical jargon or technical measurements.
+        healing_quality   = self._describe_healing(healing_score)
 
-**Current Situation (DO NOT mention these numbers directly to the patient):**
+        # Human-readable wound type label and context
+        wound_labels = {
+            "surgical_incision": ("surgical incision", "a clean cut that was made during a procedure"),
+            "laceration":        ("laceration",         "a deep tear in the skin"),
+            "burn":              ("burn",               "a burn injury to the skin"),
+            "pressure_ulcer":   ("pressure ulcer",      "a wound caused by prolonged pressure on the skin"),
+            "diabetic_ulcer":   ("diabetic ulcer",       "a wound related to diabetes that needs careful monitoring"),
+            "abrasion":         ("abrasion",             "a surface scrape of the skin"),
+            "venous_ulcer":     ("venous ulcer",         "a wound related to poor circulation in the leg"),
+        }
+        wtype_label, wtype_context = wound_labels.get(
+            wound_type, ("wound", "a wound that is being monitored")
+        )
+
+        prompt = f"""You are a caring, warm healthcare professional talking to a patient about their healing wound. Use simple, everyday language — NO medical jargon or technical measurements.
+
+**Wound Information (DO NOT quote these numbers directly to the patient):**
+- Wound type: {wtype_label} — {wtype_context}
 - Size: {size_description} (approximately {size_comparison})
 - Inflammation: {inflammation_level} redness
-- Healing progress: The wound is healing {healing_quality}
+- Healing progress: healing {healing_quality}
 - Overall score: {healing_score}/100
 - Risk level: {risk_level}
 
@@ -417,51 +428,37 @@ Write your warm, patient-friendly assessment now:"""
         self,
         risk_level: str,
         redness: float,
-        area_cm2: float
+        area_cm2: float,
+        wound_type: str = "unknown",
     ) -> str:
-        """
-        Generate patient-friendly care recommendations
-        
-        Args:
-            risk_level: Risk assessment level
-            redness: Redness index
-            area_cm2: Wound area
-            
-        Returns:
-            Recommendation text in plain language
-        """
-        recommendations = []
-        
-        # Basic care
-        recommendations.append("Keep the wound clean and dry.")
-        recommendations.append("Follow your provider's dressing change instructions.")
-        
-        # Add specific recommendations based on metrics
+        """Generate wound-type-specific care recommendations."""
+        recs = []
+
+        # Wound-type-specific first line
+        type_specific = {
+            "surgical_incision": "Keep the incision clean and dry. Do not submerge in water until cleared by your surgeon.",
+            "laceration":        "Keep the wound clean and covered. Avoid activities that could reopen the tear.",
+            "burn":              "Keep the burn covered with a sterile dressing. Do not apply ice or butter.",
+            "pressure_ulcer":   "Relieve pressure from the area as much as possible. Reposition every 2 hours if bed-bound.",
+            "diabetic_ulcer":   "Keep the wound clean and off-loaded (no weight bearing if on foot). Monitor blood sugar closely.",
+            "abrasion":         "Rinse gently with clean water and keep covered to prevent infection.",
+            "venous_ulcer":     "Elevate the leg above heart level when resting. Compression bandaging as directed by your provider.",
+        }
+        recs.append(type_specific.get(wound_type, "Keep the wound clean and dry. Follow your provider's dressing instructions."))
+
+        # Inflammation-based addition
         if redness > 0.6:
-            recommendations.append(
-                "Watch for signs like increased warmth, swelling, or discharge."
-            )
-        
-        if area_cm2 > 15:
-            recommendations.append(
-                "Avoid activities that might stress the wound area."
-            )
-        
-        # Add urgency based on risk level
+            recs.append("Watch for signs of infection: increased warmth, swelling, pus, or a bad smell.")
+
+        # Risk-based urgency
         if risk_level == "high":
-            recommendations.append(
-                "⚠️ Contact your healthcare provider within 24 hours for evaluation."
-            )
+            recs.append("⚠️ Contact your healthcare provider within 24 hours for evaluation.")
         elif risk_level == "medium":
-            recommendations.append(
-                "Contact your provider if things don't improve in the next 2-3 days."
-            )
+            recs.append("Contact your provider if there is no improvement within 2–3 days.")
         else:
-            recommendations.append(
-                "Continue your current care. Reach out to your provider if you have any concerns."
-            )
-        
-        return " ".join(recommendations)
+            recs.append("Continue your current care routine and reach out if you notice any changes.")
+
+        return " ".join(recs)
 
 
 # Singleton instance for reuse
