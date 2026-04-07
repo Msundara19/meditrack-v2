@@ -10,6 +10,11 @@ from pathlib import Path
 import logging
 
 from app.services.wound_classifier import WoundClassifier, WoundFeatures
+from app.services.ml_classifier import get_ml_classifier
+
+# Confidence threshold: if the ML model's top-1 probability is below this,
+# fall back to the heuristic classifier.
+_ML_CONFIDENCE_THRESHOLD = 0.60
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,31 @@ class WoundAnalyzer:
         
         # Classify wound type and extract enhanced features
         wound_features = self.classifier.classify_and_extract_features(mask, image)
+
+        # --- ML classifier override ---
+        # Run the trained EfficientNet-B0 on the raw image.  If the model is
+        # available and confident, override the heuristic prediction.
+        ml_clf = get_ml_classifier()
+        if ml_clf.is_available():
+            try:
+                ml_result = ml_clf.predict(image_path)
+                wound_features.confidence_scores = ml_result["all_scores"]
+                wound_features.ml_confidence = ml_result["confidence"]
+                if ml_result["confidence"] >= _ML_CONFIDENCE_THRESHOLD:
+                    wound_features.wound_type = ml_result["wound_type"]
+                    wound_features.classified_by = "ml"
+                    logger.info(
+                        f"ML classifier: {ml_result['wound_type']} "
+                        f"(confidence={ml_result['confidence']:.2f})"
+                    )
+                else:
+                    wound_features.classified_by = "heuristic"
+                    logger.info(
+                        f"ML confidence too low ({ml_result['confidence']:.2f}), "
+                        f"using heuristic: {wound_features.wound_type}"
+                    )
+            except Exception as exc:
+                logger.warning(f"ML classifier error, using heuristic fallback: {exc}")
         
         # Find contours for visualization
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
