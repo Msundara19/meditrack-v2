@@ -352,6 +352,81 @@ with tab1:
                     "Total Pixels": metrics['wound_area_pixels'],
                 })
         
+        # --- Side-by-side comparison with previous scan ---
+        try:
+            history_resp = requests.get(
+                f"{API_URL}/api/wounds/patient/{patient_id}/history",
+                timeout=10
+            )
+            if history_resp.status_code == 200:
+                history_data = history_resp.json()
+                scans = history_data.get("scans", [])
+                if len(scans) >= 2:
+                    current_scan = scans[0]
+                    prev_scan = scans[1]
+                    st.markdown("---")
+                    st.markdown("### 🔄 Comparison with Previous Scan")
+
+                    col_curr, col_prev = st.columns(2)
+                    with col_curr:
+                        st.caption(f"**Current** — {current_scan['scan_date'][:10]}")
+                        img_resp = requests.get(
+                            f"{API_URL}/api/wounds/{current_scan['id']}/annotated", timeout=15
+                        )
+                        if img_resp.status_code == 200:
+                            st.image(img_resp.content, use_container_width=True)
+
+                    with col_prev:
+                        st.caption(f"**Previous** — {prev_scan['scan_date'][:10]}")
+                        img_resp = requests.get(
+                            f"{API_URL}/api/wounds/{prev_scan['id']}/annotated", timeout=15
+                        )
+                        if img_resp.status_code == 200:
+                            st.image(img_resp.content, use_container_width=True)
+
+                    # Delta metrics
+                    curr_m = current_scan["metrics"]
+                    prev_m = prev_scan["metrics"]
+
+                    def delta(curr, prev, label, fmt=".1f", invert=False):
+                        diff = curr - prev
+                        arrow = "▲" if diff > 0 else "▼"
+                        color = "green" if (diff > 0) != invert else "red"
+                        return f"{curr:{fmt}} <span style='color:{color}'>{arrow} {abs(diff):{fmt}}</span>"
+
+                    st.markdown("#### Metric Changes")
+                    d1, d2, d3 = st.columns(3)
+                    with d1:
+                        score_diff = curr_m["healing_score"] - prev_m["healing_score"]
+                        sign = "+" if score_diff >= 0 else ""
+                        color = "green" if score_diff >= 0 else "red"
+                        st.markdown(f"**Healing Score**<br>{curr_m['healing_score']:.0f} <span style='color:{color}'>({sign}{score_diff:.0f})</span>", unsafe_allow_html=True)
+                    with d2:
+                        area_diff = curr_m["wound_area_cm2"] - prev_m["wound_area_cm2"]
+                        sign = "+" if area_diff >= 0 else ""
+                        color = "green" if area_diff <= 0 else "red"
+                        st.markdown(f"**Area (cm²)**<br>{curr_m['wound_area_cm2']:.1f} <span style='color:{color}'>({sign}{area_diff:.1f})</span>", unsafe_allow_html=True)
+                    with d3:
+                        red_diff = curr_m["redness_index"] - prev_m["redness_index"]
+                        sign = "+" if red_diff >= 0 else ""
+                        color = "green" if red_diff <= 0 else "red"
+                        st.markdown(f"**Redness**<br>{curr_m['redness_index']:.2f} <span style='color:{color}'>({sign}{red_diff:.2f})</span>", unsafe_allow_html=True)
+        except Exception:
+            pass  # Comparison is non-critical
+
+        # --- PDF download ---
+        st.markdown("---")
+        pdf_resp = requests.get(
+            f"{API_URL}/api/wounds/{result['scan_id']}/report", timeout=30
+        )
+        if pdf_resp.status_code == 200:
+            st.download_button(
+                label="📄 Download PDF Report",
+                data=pdf_resp.content,
+                file_name=f"meditrack_report_{result['scan_id'][:8]}.pdf",
+                mime="application/pdf",
+            )
+
         # New scan button
         if st.button("📸 Analyze Another Image"):
             st.session_state.analysis_complete = False
@@ -384,6 +459,18 @@ with tab2:
                         st.info(f"No scans found for patient: {history_patient_id}")
                     else:
                         st.success(f"✓ Found {data['scan_count']} scans")
+
+                        # Healing trajectory prediction
+                        traj = data.get("healing_trajectory", {})
+                        if traj.get("available"):
+                            trend = traj.get("trend", "")
+                            msg = traj.get("message", "")
+                            if trend == "good":
+                                st.success(f"🟢 {msg}")
+                            elif trend == "improving":
+                                st.info(f"📈 {msg}  (improving +{traj.get('slope_per_scan', 0):.1f} pts/scan)")
+                            else:
+                                st.warning(f"📉 {msg}")
                         
                         scans = data['scans']
                         df_data = []
