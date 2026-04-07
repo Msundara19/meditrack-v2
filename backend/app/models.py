@@ -3,7 +3,7 @@ Pydantic models for API request/response validation
 """
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 
 class WoundMetricsResponse(BaseModel):
@@ -14,13 +14,18 @@ class WoundMetricsResponse(BaseModel):
     edge_sharpness: float
     healing_score: float
     
-    # NEW: Classification fields
+    # Classification fields
     wound_type: str = "unknown"
     length_cm: Optional[float] = None
     width_cm: Optional[float] = None
     aspect_ratio: Optional[float] = None
     circularity: Optional[float] = None
     measurement_type: Optional[str] = None
+
+    # ML classifier outputs
+    confidence_scores: Optional[Dict[str, float]] = None
+    ml_confidence: Optional[float] = None
+    classified_by: str = "heuristic"  # "ml" | "heuristic"
 
 
 class AnalysisResponse(BaseModel):
