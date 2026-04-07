@@ -78,7 +78,7 @@ class WoundAnalyzer:
                 raise ValueError(f"Failed to load image from {image_path}")
             return image
 
-    def analyze_wound(self, image_path: str) -> WoundMetrics:
+    def analyze_wound(self, image_path: str, calibration_factor: float = None) -> WoundMetrics:
         """
         Complete wound analysis pipeline with classification.
 
@@ -143,10 +143,23 @@ class WoundAnalyzer:
                 "well-lit, and not obscured by clothing or bandages."
             )
 
-        area_cm2 = area_pixels * (self.calibration_factor ** 2)
+        # Use per-request calibration if provided, otherwise fall back to instance default.
+        cal = calibration_factor if calibration_factor is not None else self.calibration_factor
+
+        area_cm2 = area_pixels * (cal ** 2)
         redness_index = self._calculate_redness(preprocessed, mask)
         edge_sharpness = self._calculate_edge_sharpness(mask)
         healing_score = self._calculate_healing_score(area_cm2, redness_index, edge_sharpness)
+
+        # Rescale wound_features linear measurements to match the chosen calibration.
+        # wound_features was computed by WoundClassifier using self.calibration_factor;
+        # if the user specified a different factor, rescale proportionally.
+        if wound_features and calibration_factor is not None:
+            scale = calibration_factor / self.calibration_factor
+            wound_features.area_cm2    = round(wound_features.area_cm2    * scale ** 2, 2)
+            wound_features.length_cm   = round(wound_features.length_cm   * scale, 2)
+            wound_features.width_cm    = round(wound_features.width_cm    * scale, 2)
+            wound_features.perimeter_cm = round(wound_features.perimeter_cm * scale, 2)
 
         # Create annotated visualization using preprocessed image (same size as mask)
         annotated = self._create_annotated_image(preprocessed, mask, contours, wound_features)
