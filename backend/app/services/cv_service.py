@@ -216,73 +216,98 @@ class WoundAnalyzer:
     def _segment_wound(self, image: np.ndarray) -> np.ndarray:
         """
         Segment wound region using multiple techniques:
-        1. HSV color space for red detection
-        2. LAB color space for redness in a* channel
-        3. Otsu's thresholding
-        4. Morphological operations for cleanup
-        
+        1. HSV color space for red hue detection (tight hue bands)
+        2. LAB color space — a* channel with percentile-based threshold
+           (avoids Otsu capturing all skin tone as "wound")
+        3. Morphological cleanup
+        4. Area sanity cap: if largest contour > 25% of image, try
+           HSV-only with tighter saturation to avoid over-segmentation
+
         Args:
             image: Preprocessed BGR image
-            
+
         Returns:
             Binary mask (255 = wound, 0 = background)
         """
-        # Convert to different color spaces
+        h_img, w_img = image.shape[:2]
+        total_pixels = h_img * w_img
+
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-        
-        # Method 1: HSV red hue detection
+
+        # --- Method 1: HSV red hue bands (unchanged) ---
         lower_red1 = np.array([0, 50, 50])
         upper_red1 = np.array([10, 255, 255])
         lower_red2 = np.array([170, 50, 50])
         upper_red2 = np.array([180, 255, 255])
-        
-        mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
-        mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
-        mask_hsv = cv2.bitwise_or(mask_red1, mask_red2)
-        
-        # Method 2: LAB color space (a* channel detects red/green)
-        a_channel = lab[:, :, 1]
-        
-        # Apply Otsu's thresholding on a* channel
-        _, mask_lab = cv2.threshold(
-            a_channel,
-            0, 255,
-            cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        mask_hsv = cv2.bitwise_or(
+            cv2.inRange(hsv, lower_red1, upper_red1),
+            cv2.inRange(hsv, lower_red2, upper_red2),
         )
-        
-        # Combine both methods
-        combined_mask = cv2.bitwise_or(mask_hsv, mask_lab)
-        
-        # Morphological operations to clean up
+
+        # --- Method 2: LAB a* channel — percentile threshold ---
+        # Otsu on a* captures all skin tone.  Instead, only take pixels in
+        # the top 10th percentile of redness AND above the neutral midpoint
+        # (128 in OpenCV's 0-255 LAB encoding = a* = 0 = neutral).
+        a_channel = lab[:, :, 1].astype(np.float32)
+        threshold_pct = np.percentile(a_channel, 90)   # top 10% most red
+        # Require pixel to be both above the 90th-percentile AND above 135
+        # (a* > 135 = distinctly red, not just "slightly warmer than median")
+        lab_thresh = max(threshold_pct, 135.0)
+        mask_lab = (a_channel >= lab_thresh).astype(np.uint8) * 255
+
+        # --- Combine & morphological cleanup ---
+        combined = cv2.bitwise_or(mask_hsv, mask_lab)
+
         kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        mask_closed = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel_close)
-        
+        combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel_close)
         kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask_opened = cv2.morphologyEx(mask_closed, cv2.MORPH_OPEN, kernel_open)
-        
-        # Find largest contour (assume it's the wound)
-        contours, _ = cv2.findContours(
-            mask_opened,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE
-        )
-        
-        if not contours:
-            logger.warning("No contours found, returning empty mask")
-            return np.zeros_like(mask_opened)
-        
-        # Select largest contour
-        largest_contour = max(contours, key=cv2.contourArea)
-        
-        # Create final mask with only the largest contour
-        mask_final = np.zeros_like(mask_opened)
-        cv2.drawContours(mask_final, [largest_contour], -1, 255, -1)
-        
-        # Additional smoothing of boundary
+        combined = cv2.morphologyEx(combined, cv2.MORPH_OPEN, kernel_open)
+
+        def _best_contour(mask_src):
+            cnts, _ = cv2.findContours(mask_src, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts:
+                return None, 0, []
+            largest = max(cnts, key=cv2.contourArea)
+            return largest, cv2.contourArea(largest), cnts
+
+        contour, contour_area, _ = _best_contour(combined)
+
+        # --- Sanity cap: if contour covers > 25% of image, over-segmentation ---
+        # Fall back to HSV-only mask with tighter saturation requirement.
+        if contour is None or (contour_area / total_pixels) > 0.25:
+            logger.warning(
+                f"Over-segmentation detected (contour={contour_area/total_pixels:.1%} of image). "
+                "Retrying with HSV-only + tighter saturation."
+            )
+            lower_tight1 = np.array([0, 80, 60])
+            upper_tight1 = np.array([10, 255, 255])
+            lower_tight2 = np.array([170, 80, 60])
+            upper_tight2 = np.array([180, 255, 255])
+            mask_tight = cv2.bitwise_or(
+                cv2.inRange(hsv, lower_tight1, upper_tight1),
+                cv2.inRange(hsv, lower_tight2, upper_tight2),
+            )
+            mask_tight = cv2.morphologyEx(mask_tight, cv2.MORPH_CLOSE, kernel_close)
+            mask_tight = cv2.morphologyEx(mask_tight, cv2.MORPH_OPEN, kernel_open)
+            contour2, contour_area2, _ = _best_contour(mask_tight)
+            # Use the tighter mask if it found anything
+            if contour2 is not None and contour_area2 > 0:
+                contour, contour_area, combined = contour2, contour_area2, mask_tight
+                logger.info(f"Tighter HSV mask: contour={contour_area2/total_pixels:.1%} of image")
+
+        if contour is None:
+            logger.warning("No contours found after fallback, returning empty mask")
+            return np.zeros((h_img, w_img), dtype=np.uint8)
+
+        # Build final mask from selected contour
+        mask_final = np.zeros((h_img, w_img), dtype=np.uint8)
+        cv2.drawContours(mask_final, [contour], -1, 255, -1)
+
+        # Smooth boundary
         mask_final = cv2.GaussianBlur(mask_final, (5, 5), 0)
         _, mask_final = cv2.threshold(mask_final, 127, 255, cv2.THRESH_BINARY)
-        
+
         return mask_final
     
     def _calculate_redness(self, image: np.ndarray, mask: np.ndarray) -> float:
