@@ -145,7 +145,9 @@ async def analyze_wound(
                 redness_index=cv_metrics.redness_index,
                 edge_sharpness=cv_metrics.edge_sharpness,
                 healing_score=cv_metrics.healing_score,
-                previous_metrics=previous_metrics
+                wound_type=cv_metrics.wound_type,
+                classified_by=cv_metrics.wound_features.classified_by if cv_metrics.wound_features else "heuristic",
+                previous_metrics=previous_metrics,
             )
         except Exception as e:
             logger.error(f"LLM analysis failed: {e}")
