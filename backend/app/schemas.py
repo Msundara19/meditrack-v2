@@ -44,13 +44,16 @@ class WoundScan(Base):
     # Metadata
     calibration_factor = Column(Float)
     
-    # NEW: Classification fields
+    # Classification fields
     wound_type = Column(String, default="unknown")
     length_cm = Column(Float, nullable=True)
     width_cm = Column(Float, nullable=True)
     aspect_ratio = Column(Float, nullable=True)
     circularity = Column(Float, nullable=True)
     solidity = Column(Float, nullable=True)
+
+    # Duplicate detection
+    image_hash = Column(String, nullable=True, index=True)
     
     patient = relationship("Patient", back_populates="scans")
     
