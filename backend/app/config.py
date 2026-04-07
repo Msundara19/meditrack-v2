@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     UPLOAD_DIR: Path = DATA_DIR / "uploads"
     
     # Computer Vision
-    DEFAULT_CALIBRATION_FACTOR: float = 0.1
+    # 0.025 ≈ phone camera ~25 cm from wound (1 pixel ≈ 0.25 mm).
+    # The old default of 0.1 gave absurd measurements (65 cm wounds).
+    DEFAULT_CALIBRATION_FACTOR: float = 0.025
     
     # LLM API Keys
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
