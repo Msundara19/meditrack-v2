@@ -208,30 +208,37 @@ class LLMAnalyzer:
 
 """
         
-        # Add comparison if previous metrics available
+        # Add comparison if previous metrics available — only when overall status is consistent
         if previous_metrics:
             prev_area = previous_metrics.get('area_cm2', 0)
             prev_score = previous_metrics.get('healing_score', 0)
-            
+
             area_change = area_cm2 - prev_area
             score_change = healing_score - prev_score
-            
-            if area_change < -2:
-                prompt += f"**Good News:** The wound is getting smaller since last time (healing well).\n"
+
+            # Only report "getting smaller" when the wound is actually doing well overall
+            if area_change < -2 and healing_score >= 40:
+                prompt += "**Good News:** The wound is getting smaller since last time.\n"
             elif area_change > 2:
-                prompt += f"**Note:** The wound has grown slightly since last time. This needs attention.\n"
-            
-            if score_change > 10:
-                prompt += f"**Progress:** Healing is improving compared to last scan.\n"
-            elif score_change < -10:
-                prompt += f"**Concern:** Healing has slowed down since last time.\n"
-        
+                prompt += "**Note:** The wound has grown slightly since last time. This needs attention.\n"
+
+            if score_change > 10 and healing_score >= 40:
+                prompt += "**Progress:** Healing is improving compared to last scan.\n"
+            elif score_change < -10 or (healing_score < 30 and score_change <= 0):
+                prompt += "**Concern:** Healing has slowed down or is progressing more slowly than expected.\n"
+
+        # Add explicit tone constraint based on current status so LLM stays consistent
+        if healing_score < 30 or risk_level == "high":
+            prompt += "\n**IMPORTANT — tone constraint:** The wound is NOT healing well right now. Do NOT say 'healing well', 'doing great', or 'gotten smaller'. Be honest and gently encourage the patient to seek care.\n"
+        elif healing_score >= 70 and risk_level == "low":
+            prompt += "\n**IMPORTANT — tone constraint:** The wound is genuinely healing well. You may be reassuring and positive.\n"
+
         prompt += """
 **Your Task:** Write a brief, warm message (2-3 sentences maximum) that:
 
 1. Explains how the wound is doing in PLAIN ENGLISH
    - Use phrases like "about the size of..." not "6907.2 cm²"
-   - Say "healing well" not "healing score of 17/100"
+   - Do not say "healing well" unless the wound truly is — match the tone constraint above
    - Say "some redness" not "redness index 0.58"
 
 2. Sounds like a caring doctor talking to their patient
@@ -250,10 +257,13 @@ EXAMPLES OF GOOD RESPONSES:
 
 - "Your wound is larger than we'd like to see at this stage, and there's noticeable redness around it. I recommend checking in with your doctor in the next day or two to make sure everything is on track."
 
+- "Your wound needs a little extra attention right now — healing has been slower than we'd hope. Please reach out to your doctor so they can take a look and adjust your care plan."
+
 AVOID SAYING:
 - Technical measurements like "6907.2 cm²" or "healing score 17/100"
 - Medical jargon like "inflammation index" or "tissue granulation"
 - Scary phrases like "HIGH RISK" (say "needs attention" instead)
+- Contradictory praise ("healing well", "doing great") when the wound has a low score
 
 Write your warm, patient-friendly assessment now:"""
         
