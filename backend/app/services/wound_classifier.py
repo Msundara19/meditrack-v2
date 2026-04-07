@@ -17,14 +17,15 @@ logger = logging.getLogger(__name__)
 
 
 class WoundType(Enum):
-    """Wound classification types"""
+    """Wound classification types — must stay in sync with ml_classifier.WOUND_CLASSES."""
     SURGICAL_INCISION = "surgical_incision"
     LACERATION = "laceration"
     BURN = "burn"
     PRESSURE_ULCER = "pressure_ulcer"
     DIABETIC_ULCER = "diabetic_ulcer"
     ABRASION = "abrasion"
-    PUNCTURE = "puncture"
+    VENOUS_ULCER = "venous_ulcer"
+    PUNCTURE = "puncture"   # heuristic-only; ML uses venous_ulcer as catch-all
     UNKNOWN = "unknown"
 
 
@@ -92,10 +93,13 @@ class WoundClassifier:
         
         # Classify
         wound_type = self._classify_from_features(features)
-        
+
         # Determine measurement type
         if wound_type in [WoundType.SURGICAL_INCISION, WoundType.LACERATION]:
             measurement_type = "linear"
+        elif wound_type == WoundType.UNKNOWN:
+            # Unknown → can't reliably measure; default to area, zero out linear fields
+            measurement_type = "area"
         else:
             measurement_type = "area"
         
@@ -394,10 +398,15 @@ class WoundClassifier:
         if solid < 0.75 and 1.0 < area < 20.0:
             logger.debug(f"→ Abrasion (irregular)")
             return WoundType.ABRASION
-        
-        # DEFAULT: Unknown
-        logger.debug(f"→ Unknown (aspect={aspect:.2f}, circ={circ:.2f}, "
-                    f"smooth={smooth:.3f}, straight={straight}, sutures={sutures})")
+
+        # RULE 8: Venous ulcer — catch-all for lower-leg chronic wounds
+        # (matches the ML model's class list; replaces UNKNOWN as default)
+        if area > 0.5:
+            logger.debug(f"→ Venous ulcer (catch-all, area={area:.1f}cm²)")
+            return WoundType.VENOUS_ULCER
+
+        # Last resort: truly unclassifiable (zero or near-zero area)
+        logger.debug(f"→ Unknown (aspect={aspect:.2f}, circ={circ:.2f}, area={area:.2f})")
         return WoundType.UNKNOWN
     
     def _get_default_features(self) -> dict:
