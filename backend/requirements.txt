@@ -21,3 +21,4 @@ python-dotenv==1.0.0
 
 # Utilities
 python-multipart==0.0.9
+reportlab>=4.0.0
