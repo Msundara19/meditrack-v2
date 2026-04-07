@@ -73,6 +73,9 @@ class WoundScan(Base):
                 "wound_type": self.wound_type,
                 "length_cm": self.length_cm,
                 "width_cm": self.width_cm,
+                "circularity": self.circularity,
+                "aspect_ratio": self.aspect_ratio,
+                "solidity": self.solidity,
             },
             "analysis": {
                 "risk_level": self.risk_level,
