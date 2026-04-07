@@ -329,6 +329,29 @@ with tab1:
         )
         st.session_state.patient_id = patient_id
 
+        # Calibration selector
+        st.markdown('<div class="sec-label" style="margin-top:0.8rem">Camera Distance</div>', unsafe_allow_html=True)
+        cal_option = st.selectbox(
+            "Camera distance from wound",
+            options=[
+                "Very close — ~15 cm",
+                "Close — ~25 cm",
+                "Normal — ~35 cm",
+                "Far — ~50 cm",
+            ],
+            index=1,
+            help="Approximate distance affects measurement accuracy. Place a coin or ruler in frame for precise results.",
+            label_visibility="collapsed",
+        )
+        cal_map = {
+            "Very close — ~15 cm": 0.015,
+            "Close — ~25 cm":      0.022,
+            "Normal — ~35 cm":     0.030,
+            "Far — ~50 cm":        0.044,
+        }
+        calibration_factor = cal_map[cal_option]
+        st.caption("⚠️ Measurements are approximate. Place a coin or ruler in frame for accurate sizing.")
+
         uploaded_file = st.file_uploader(
             "Drop an image or click to upload",
             type=["jpg", "jpeg", "png"],
@@ -351,7 +374,7 @@ with tab1:
                         response = requests.post(
                             f"{API_URL}/api/wounds/analyze",
                             files={"file": ("wound.jpg", uploaded_file.getvalue(), "image/jpeg")},
-                            data={"patient_id": patient_id},
+                            data={"patient_id": patient_id, "calibration_factor": calibration_factor},
                             timeout=60,
                         )
                         if response.status_code == 200:
