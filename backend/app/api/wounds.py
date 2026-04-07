@@ -5,19 +5,21 @@ from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
+import hashlib
 import io
 import uuid
-import shutil
 import numpy as np
 from datetime import datetime
 import logging
 
 from app.database import get_db
-from app.services.cv_service import WoundAnalyzer
+from app.services.cv_service import WoundAnalyzer, validate_image
 from app.services.llm_service import get_llm_analyzer
 from app.services.report_service import generate_scan_report
 from app import schemas, models
 from app.config import settings
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 
 logger = logging.getLogger(__name__)
 
@@ -49,44 +51,70 @@ async def analyze_wound(
     - Risk assessment and AI summary
     - Links to original and annotated images
     """
-    # Validate file type
+    # ── 1. File type check ───────────────────────────────────────────────────
     if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image (JPEG, PNG, etc.)")
+
+    # ── 2. Read content + size limit ─────────────────────────────────────────
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=400,
-            detail="File must be an image (JPEG, PNG, etc.)"
+            status_code=413,
+            detail=f"Image too large ({len(content)//1024//1024}MB). Maximum allowed size is 20MB.",
         )
-    
-    # Generate unique scan ID
+
+    # ── 3. Compute hash for duplicate detection ───────────────────────────────
+    image_hash = hashlib.md5(content).hexdigest()
+    duplicate = (
+        db.query(schemas.WoundScan)
+        .filter(
+            schemas.WoundScan.patient_id == patient_id,
+            schemas.WoundScan.image_hash == image_hash,
+        )
+        .first()
+    )
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This exact image was already analyzed for patient '{patient_id}' "
+                f"(scan ID: {duplicate.id[:8]}). Please upload a new photo."
+            ),
+        )
+
+    # ── 4. Save file ──────────────────────────────────────────────────────────
     scan_id = str(uuid.uuid4())
-    
-    # Ensure upload directory exists
     upload_dir = Path(settings.UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save uploaded file
-    file_extension = Path(file.filename).suffix or ".jpg"
-    image_filename = f"{scan_id}{file_extension}"
-    image_path = upload_dir / image_filename
-    
+
+    file_extension = Path(file.filename or "wound.jpg").suffix or ".jpg"
+    image_path = upload_dir / f"{scan_id}{file_extension}"
+
     try:
-        # Save file
-        with image_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
+        image_path.write_bytes(content)
         logger.info(f"Saved uploaded image: {image_path}")
-        
-        # Run CV analysis with classification
+
+        # ── 5. Basic image validation (size / readability) ────────────────────
+        if not validate_image(str(image_path)):
+            image_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Image is too small or unreadable. "
+                    "Please upload a clear photo (minimum 100×100 px)."
+                ),
+            )
+
+        # ── 6. CV analysis ────────────────────────────────────────────────────
         try:
             cv_metrics = wound_analyzer.analyze_wound(str(image_path))
+        except ValueError as e:
+            image_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail=str(e))
         except Exception as e:
             logger.error(f"CV analysis failed: {e}")
-            # Cleanup
-            if image_path.exists():
-                image_path.unlink()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Computer vision analysis failed: {str(e)}"
-            )
+            image_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail=f"Computer vision analysis failed: {e}")
         
         # Save annotated image
         annotated_filename = f"{scan_id}_annotated{file_extension}"
@@ -160,6 +188,7 @@ async def analyze_wound(
             aspect_ratio=cv_metrics.wound_features.aspect_ratio if cv_metrics.wound_features else None,
             circularity=cv_metrics.wound_features.circularity if cv_metrics.wound_features else None,
             solidity=cv_metrics.wound_features.solidity if cv_metrics.wound_features else None,
+            image_hash=image_hash,
         )
         
         db.add(scan)
@@ -415,9 +444,15 @@ def _predict_healing_trajectory(scans: list) -> dict:
     """
     Predict healing trajectory from chronological scan history.
     Uses linear regression on healing scores to estimate scans until good healing.
+    Requires at least 3 scans — a 2-point line is not a reliable trend.
     """
-    if len(scans) < 2:
-        return {"available": False, "reason": "Need at least 2 scans for prediction"}
+    if len(scans) < 3:
+        return {
+            "available": False,
+            "reason": f"Need at least 3 scans for prediction (have {len(scans)}).",
+        }
+
+    confidence = "low" if len(scans) < 5 else "medium" if len(scans) < 10 else "high"
 
     # scans are newest-first; reverse for chronological order
     scores = [s["metrics"]["healing_score"] for s in reversed(scans)]
@@ -430,6 +465,7 @@ def _predict_healing_trajectory(scans: list) -> dict:
         return {
             "available": True,
             "trend": "declining",
+            "confidence": confidence,
             "slope_per_scan": round(float(slope), 2),
             "current_score": round(current, 1),
             "message": "Healing score is not improving. Consider consulting a healthcare provider.",
@@ -440,6 +476,7 @@ def _predict_healing_trajectory(scans: list) -> dict:
         return {
             "available": True,
             "trend": "good",
+            "confidence": confidence,
             "slope_per_scan": round(float(slope), 2),
             "current_score": round(current, 1),
             "message": "Wound is healing well (score ≥ 85).",
@@ -449,6 +486,7 @@ def _predict_healing_trajectory(scans: list) -> dict:
     return {
         "available": True,
         "trend": "improving",
+        "confidence": confidence,
         "slope_per_scan": round(float(slope), 2),
         "current_score": round(current, 1),
         "scans_to_target": scans_needed,
