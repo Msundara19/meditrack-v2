@@ -122,20 +122,39 @@ async def analyze_wound(
         annotated_path = upload_dir / annotated_filename
         wound_analyzer.save_annotated_image(cv_metrics.annotated_image, str(annotated_path))
         
-        # Get previous scan for comparison
-        previous_scan = db.query(schemas.WoundScan)\
-            .filter(schemas.WoundScan.patient_id == patient_id)\
-            .order_by(schemas.WoundScan.scan_date.desc())\
+        # Get previous scan for comparison — only valid if:
+        # 1. Same wound type (comparing an abrasion to a pressure ulcer is meaningless)
+        # 2. Within 60 days (older scans are likely a different wound episode)
+        from datetime import timedelta
+        sixty_days_ago = datetime.utcnow() - timedelta(days=60)
+
+        previous_scan = (
+            db.query(schemas.WoundScan)
+            .filter(
+                schemas.WoundScan.patient_id == patient_id,
+                schemas.WoundScan.wound_type == cv_metrics.wound_type,
+                schemas.WoundScan.scan_date >= sixty_days_ago,
+            )
+            .order_by(schemas.WoundScan.scan_date.desc())
             .first()
-        
+        )
+
         previous_metrics = None
         if previous_scan:
             previous_metrics = {
                 "area_cm2": previous_scan.wound_area_cm2,
                 "redness_index": previous_scan.redness_index,
-                "healing_score": previous_scan.healing_score
+                "healing_score": previous_scan.healing_score,
             }
-            logger.info(f"Found previous scan for comparison: {previous_scan.id}")
+            logger.info(
+                f"Found comparable previous scan {previous_scan.id} "
+                f"(type={previous_scan.wound_type}, date={previous_scan.scan_date.date()})"
+            )
+        else:
+            logger.info(
+                "No comparable previous scan found (same wound type within 60 days) — "
+                "skipping comparison."
+            )
         
         # Generate LLM analysis
         try:
