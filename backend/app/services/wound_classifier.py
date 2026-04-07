@@ -332,81 +332,90 @@ class WoundClassifier:
     
     def _classify_from_features(self, features: dict) -> WoundType:
         """
-        Multi-factor decision tree for wound classification
-        VERY AGGRESSIVE surgical incision detection for real-world wounds
+        Shape-based wound classification decision tree.
+
+        Key insight: surgical incisions are LINEAR (high aspect) and CLEAN (high
+        solidity). Chronic ulcers (pressure, diabetic, venous) are OVAL/ROUND
+        and have moderate-to-low solidity. The previous rules were too aggressive
+        about surgical incision and caught oval ulcers via the circ<0.6 rule.
+
+        Rule ordering matters — ulcer pre-check fires before any incision rule
+        so that oval/irregular wounds are never misclassified as surgical cuts.
         """
         aspect = features['aspect_ratio']
-        circ = features['circularity']
-        solid = features['solidity']
+        circ   = features['circularity']
+        solid  = features['solidity']
         smooth = features['edge_smoothness']
         straight = features['has_straight_edges']
-        sutures = features['has_sutures']
-        area = features['area_cm2']
-        
-        # RULE 1: Surgical Incision - VERY AGGRESSIVE
-        # If sutures detected, it's definitely surgical
-        if sutures:
-            logger.debug(f"→ Surgical incision (SUTURES DETECTED)")
-            return WoundType.SURGICAL_INCISION
-        
-        # Aspect ratio 1.5+ with straight edges = likely incision
-        if aspect >= 1.5 and straight:
-            logger.debug(f"→ Surgical incision (aspect {aspect:.2f} + straight edges)")
-            return WoundType.SURGICAL_INCISION
-        
-        # Low circularity (not round) + some elongation = likely incision
-        if circ < 0.6 and aspect >= 1.3:
-            logger.debug(f"→ Surgical incision (not circular: {circ:.2f}, aspect {aspect:.2f})")
-            return WoundType.SURGICAL_INCISION
-        
-        # Very high smoothness = surgical (clean cut)
-        if smooth > 0.9 and aspect >= 1.3:
-            logger.debug(f"→ Surgical incision (very smooth: {smooth:.3f}, aspect {aspect:.2f})")
-            return WoundType.SURGICAL_INCISION
-        
-        # High aspect ratio alone
-        if aspect >= 2.5:
-            logger.debug(f"→ Surgical incision (elongated: {aspect:.2f})")
-            return WoundType.SURGICAL_INCISION
-        
-        # RULE 2: Laceration (linear but very rough)
-        if aspect >= 3.0 and smooth < 0.2:
-            logger.debug(f"→ Laceration (aspect {aspect:.2f}, rough)")
-            return WoundType.LACERATION
-        
-        # RULE 3: Puncture (small and round)
-        if area < 2.0 and circ > 0.7:
-            logger.debug(f"→ Puncture (small {area:.1f}cm², circular {circ:.2f})")
-            return WoundType.PUNCTURE
-        
-        # RULE 4: Pressure Ulcer (large, irregular, low solidity)
-        if area > 15.0 and circ < 0.5 and solid < 0.7:
-            logger.debug(f"→ Pressure ulcer (large {area:.1f}cm², irregular)")
-            return WoundType.PRESSURE_ULCER
-        
-        # RULE 5: Diabetic Ulcer (medium, round-ish)
-        if 3.0 < area < 30.0 and circ > 0.65:
-            logger.debug(f"→ Diabetic ulcer (medium {area:.1f}cm², round {circ:.2f})")
-            return WoundType.DIABETIC_ULCER
-        
-        # RULE 6: Burn (irregular but not too elongated)
-        if aspect < 2.0 and solid < 0.85 and area > 2.0:
-            logger.debug(f"→ Burn (irregular, aspect {aspect:.2f})")
-            return WoundType.BURN
-        
-        # RULE 7: Abrasion (irregular, medium size)
-        if solid < 0.75 and 1.0 < area < 20.0:
-            logger.debug(f"→ Abrasion (irregular)")
-            return WoundType.ABRASION
+        sutures  = features['has_sutures']
+        area     = features['area_cm2']
 
-        # RULE 8: Venous ulcer — catch-all for lower-leg chronic wounds
-        # (matches the ML model's class list; replaces UNKNOWN as default)
-        if area > 0.5:
-            logger.debug(f"→ Venous ulcer (catch-all, area={area:.1f}cm²)")
+        # ── RULE 1: Sutures are definitive ──────────────────────────────────
+        if sutures:
+            logger.debug("→ Surgical incision (sutures detected)")
+            return WoundType.SURGICAL_INCISION
+
+        # ── RULE 2: Chronic ulcer pre-check (runs BEFORE incision rules) ────
+        # Any wound that is roughly oval/round AND not a clean cut is an ulcer.
+        # Surgical incisions are elongated (aspect>2) and have high solidity (>0.85).
+        # Ulcers fail at least one of those: they are more compact and more ragged.
+        is_compact   = aspect < 2.5          # not strongly elongated
+        is_ragged    = solid < 0.88          # not a clean, solid cut
+        is_not_tiny  = area > 0.3            # ignore near-zero artefacts
+
+        if is_compact and is_ragged and is_not_tiny:
+            # Sub-classify within ulcer family by shape
+            if circ > 0.62 and solid > 0.74:
+                logger.debug(f"→ Diabetic ulcer (round circ={circ:.2f}, solid={solid:.2f})")
+                return WoundType.DIABETIC_ULCER
+            if solid < 0.74:
+                logger.debug(f"→ Pressure ulcer (irregular solid={solid:.2f}, circ={circ:.2f})")
+                return WoundType.PRESSURE_ULCER
+            logger.debug(f"→ Venous ulcer (oval circ={circ:.2f}, solid={solid:.2f})")
             return WoundType.VENOUS_ULCER
 
-        # Last resort: truly unclassifiable (zero or near-zero area)
-        logger.debug(f"→ Unknown (aspect={aspect:.2f}, circ={circ:.2f}, area={area:.2f})")
+        # ── RULE 3: Surgical incision ────────────────────────────────────────
+        # Only reached if wound is elongated (aspect≥2.5) OR clean (solid>0.88).
+        if solid > 0.82:
+            if aspect >= 1.5 and straight:
+                logger.debug(f"→ Surgical incision (straight edges, aspect={aspect:.2f})")
+                return WoundType.SURGICAL_INCISION
+            if aspect >= 2.5:
+                logger.debug(f"→ Surgical incision (elongated aspect={aspect:.2f})")
+                return WoundType.SURGICAL_INCISION
+            if smooth > 0.88 and aspect >= 1.3:
+                logger.debug(f"→ Surgical incision (smooth={smooth:.3f}, aspect={aspect:.2f})")
+                return WoundType.SURGICAL_INCISION
+
+        # ── RULE 4: Laceration ───────────────────────────────────────────────
+        if aspect >= 2.5 and smooth < 0.25:
+            logger.debug(f"→ Laceration (elongated+rough aspect={aspect:.2f})")
+            return WoundType.LACERATION
+        if aspect >= 2.0 and smooth < 0.2 and solid < 0.72:
+            logger.debug(f"→ Laceration (rough edges)")
+            return WoundType.LACERATION
+
+        # ── RULE 5: Puncture (very small and round) ──────────────────────────
+        if area < 1.5 and circ > 0.70:
+            logger.debug(f"→ Puncture (small area={area:.2f}cm², circ={circ:.2f})")
+            return WoundType.PUNCTURE
+
+        # ── RULE 6: Burn (irregular, not elongated) ──────────────────────────
+        if aspect < 2.0 and smooth < 0.45 and solid < 0.82:
+            logger.debug(f"→ Burn (irregular smooth={smooth:.3f})")
+            return WoundType.BURN
+
+        # ── RULE 7: Abrasion ─────────────────────────────────────────────────
+        if solid < 0.75 and smooth < 0.40:
+            logger.debug("→ Abrasion (low solidity+smoothness)")
+            return WoundType.ABRASION
+
+        # ── Catch-all ────────────────────────────────────────────────────────
+        if area > 0.5:
+            logger.debug(f"→ Venous ulcer (catch-all area={area:.2f}cm²)")
+            return WoundType.VENOUS_ULCER
+
+        logger.debug(f"→ Unknown (area too small: {area:.3f}cm²)")
         return WoundType.UNKNOWN
     
     def _get_default_features(self) -> dict:
