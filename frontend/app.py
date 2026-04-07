@@ -30,9 +30,17 @@ st.markdown("""
 #MainMenu, footer, header, [data-testid="stToolbar"], .stDeployButton { display: none !important; }
 
 .block-container {
-    padding: 0 2.5rem 3rem !important;
-    max-width: 1240px !important;
-    margin: 0 auto;
+    padding: 0 3rem 3rem !important;
+    max-width: 1100px !important;
+    margin: 0 auto !important;
+}
+section[data-testid="stMain"] > div:first-child {
+    display: flex;
+    justify-content: center;
+}
+section[data-testid="stMain"] > div:first-child > div {
+    max-width: 1100px !important;
+    width: 100% !important;
 }
 
 /* ── Nav bar ── */
