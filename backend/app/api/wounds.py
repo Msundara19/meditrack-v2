@@ -33,6 +33,7 @@ wound_analyzer = WoundAnalyzer(calibration_factor=settings.DEFAULT_CALIBRATION_F
 async def analyze_wound(
     file: UploadFile = File(..., description="Wound image (JPG, PNG)"),
     patient_id: str = Form(default="default_patient"),
+    calibration_factor: float = Form(default=None, ge=0.005, le=0.2),
     db: Session = Depends(get_db)
 ):
     """
@@ -107,7 +108,7 @@ async def analyze_wound(
 
         # ── 6. CV analysis ────────────────────────────────────────────────────
         try:
-            cv_metrics = wound_analyzer.analyze_wound(str(image_path))
+            cv_metrics = wound_analyzer.analyze_wound(str(image_path), calibration_factor=calibration_factor)
         except ValueError as e:
             image_path.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail=str(e))
