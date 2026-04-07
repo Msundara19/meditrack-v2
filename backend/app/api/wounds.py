@@ -182,6 +182,9 @@ async def analyze_wound(
                 aspect_ratio=cv_metrics.wound_features.aspect_ratio if cv_metrics.wound_features else None,
                 circularity=cv_metrics.wound_features.circularity if cv_metrics.wound_features else None,
                 measurement_type=cv_metrics.wound_features.measurement_type if cv_metrics.wound_features else "area",
+                confidence_scores=cv_metrics.wound_features.confidence_scores if cv_metrics.wound_features else None,
+                ml_confidence=cv_metrics.wound_features.ml_confidence if cv_metrics.wound_features else None,
+                classified_by=cv_metrics.wound_features.classified_by if cv_metrics.wound_features else "heuristic",
             ),
             analysis=models.AnalysisResponse(
                 risk_level=llm_result["risk_level"],
