@@ -27,6 +27,7 @@ class WoundScan(Base):
     patient_id = Column(String, ForeignKey("patients.id"), index=True)
     
     image_path = Column(String, nullable=False)
+    annotated_image_path = Column(String, nullable=True)
     scan_date = Column(DateTime, default=datetime.utcnow, index=True)
     
     # Computer vision metrics
