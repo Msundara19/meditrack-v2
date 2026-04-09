@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # The old default of 0.1 gave absurd measurements (65 cm wounds).
     DEFAULT_CALIBRATION_FACTOR: float = 0.025
     
+    # Supabase (cloud storage for images)
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    SUPABASE_BUCKET: str = os.getenv("SUPABASE_BUCKET", "wound-images")
+
     # LLM API Keys
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
