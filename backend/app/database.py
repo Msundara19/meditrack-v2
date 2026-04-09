@@ -8,11 +8,12 @@ from typing import Generator
 
 from app.config import settings
 
-# Create SQLite engine
+# check_same_thread is SQLite-only — pass it only when using SQLite
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
 engine = create_engine(
     settings.DATABASE_URL,
-    connect_args={"check_same_thread": False},  # Needed for SQLite
-    echo=False  # Set to True for SQL query logging
+    connect_args={"check_same_thread": False} if _is_sqlite else {},
+    echo=False
 )
 
 # Session factory
