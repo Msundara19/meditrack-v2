@@ -1,143 +1,72 @@
-# 🩹 MediTrack v2.0
+# MediTrack v2.0
 
-**AI-Powered Wound Healing Monitor with Multi-Factor Classification**
+**Patient-First Wound Monitoring — AI-Powered Analysis Between Clinic Visits**
 
-An advanced wound analysis system using computer vision and LLMs to classify wound types, track healing progress, and provide AI-powered care recommendations.
-
-![MediTrack Demo](docs/demo-screenshot.png)
+MediTrack is a portfolio/educational project that lets patients photograph a wound, get a plain-English explanation of how it is healing, and track progress over time. It is built for the gap between clinic visits — not as a clinical documentation tool.
 
 ---
 
-## ✨ Features
+## What It Does
 
-### 🔬 Multi-Factor Wound Classification
-- **7 Wound Types Detected**: Surgical incisions, lacerations, burns, pressure ulcers, diabetic ulcers, abrasions, venous ulcers
-- **Trained ML Model**: EfficientNet-B0 fine-tuned on wound images — 91.5% test accuracy, 0.989 macro AUC
-- **Heuristic Fallback**: Rule-based classifier (aspect ratio, circularity, solidity, suture detection) used when ML confidence < 60%
-- **Smart Measurements**: Automatic detection of measurement type (linear vs area-based)
-
-### 🤖 AI-Powered Analysis
-- **Computer Vision Pipeline**: HSV/LAB color space segmentation, Otsu thresholding, morphological operations
-- **LLM Integration**: Groq (Llama 3.1) and Google Gemini for patient-friendly summaries
-- **Risk Assessment**: Automatic classification (low/medium/high risk)
-
-### 📊 Progress Tracking
-- **Healing Score**: Composite metric (0-100) based on area, redness, and edge quality
-- **Historical Data**: Track wounds over time with visual charts
-- **Patient Management**: Multi-patient support with unique IDs
-
-### 🎨 Professional UI
-- **Clean Medical Interface**: Inspired by modern healthcare applications
-- **Responsive Design**: Works on desktop and mobile
-- **Real-time Analysis**: 10-20 second processing time
+- Classifies wound type (7 classes) using EfficientNet-B0 (91.5% accuracy, 0.989 macro AUC) with a shape-based heuristic fallback when ML confidence is below 60%
+- Segments the wound region using an OpenCV pipeline (HSV/LAB color thresholding + morphological cleanup) and measures area, redness, and edge quality
+- Generates a patient-friendly plain-English summary via Groq (Llama 3.1-8b) — no clinical jargon, no raw numbers
+- Detects healing trajectory (linear regression across scans) and flags worsening wounds
+- Produces a downloadable PDF report with annotated image, metrics, and care recommendations
+- Prevents duplicate uploads using MD5 hashing; compares scans only when wound type and recency match (same type, within 60 days)
 
 ---
 
-## 🏗️ Architecture
+## Differentiator
+
+Every commercial wound app (WoundGenius, Minuteful, eKare, Tissue Analytics) is built for clinicians — clinical metrics, EMR integration, FDA clearance. None of them explain results to the patient.
+
+MediTrack's angle is the opposite: clinically-grounded metrics, translated into words a patient can understand, designed to work from a phone at home with no training required.
+
+---
+
+## Architecture
+
 ```
-meditrack-v2/
-├── backend/              # FastAPI REST API
-│   ├── app/
-│   │   ├── api/         # API endpoints
-│   │   ├── services/    # CV & LLM services
-│   │   ├── models.py    # Pydantic models
-│   │   └── schemas.py   # Database schemas
-│   ├── data/            # Database & uploads
-│   └── requirements.txt
-├── frontend/            # Streamlit UI
-│   ├── app.py
-│   └── requirements.txt
-└── README.md
+frontend/app.py          Streamlit UI (wide layout, Montserrat theme)
+        │
+        │  HTTP (REST)
+        ▼
+backend/app/
+  api/wounds.py          FastAPI endpoints — upload, analyze, history, PDF
+  services/
+    cv_service.py        OpenCV segmentation pipeline
+    wound_classifier.py  Shape-based heuristic classifier
+    ml_classifier.py     EfficientNet-B0 inference (graceful fallback if model missing)
+    llm_service.py       Groq / Gemini prompt builder + patient-friendly summary
+    report_service.py    ReportLab PDF generation
+    storage_service.py   Local filesystem (dev) / Supabase Storage (production)
+  schemas.py             SQLAlchemy models (SQLite dev / PostgreSQL production)
 ```
 
 ---
 
-## 🚀 Quick Start
+## Tech Stack
 
-### Prerequisites
-- Python 3.11+
-- pip
-
-### Installation
-
-1. **Clone the repository**
-```bash
-git clone https://github.com/Msundara19/meditrack-v2.git
-cd meditrack-v2
-```
-
-2. **Set up backend**
-```bash
-cd backend
-pip install -r requirements.txt
-
-# Set environment variables (optional)
-# GROQ_API_KEY=your_key_here
-# GEMINI_API_KEY=your_key_here
-
-# Start backend server
-python -m app.main
-```
-
-3. **Set up frontend** (new terminal)
-```bash
-cd frontend
-pip install -r requirements.txt
-
-# Start frontend
-streamlit run app.py
-```
-
-4. **Access the application**
-- Frontend: http://localhost:8501
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+| Layer | Technology |
+|---|---|
+| API | FastAPI 0.115, Uvicorn |
+| Computer Vision | OpenCV 4.10, NumPy, Pillow |
+| ML Classification | PyTorch, EfficientNet-B0 (via timm) |
+| LLM | Groq llama-3.1-8b-instant (primary), Google Gemini (fallback) |
+| Database | SQLite (dev), PostgreSQL-ready via SQLAlchemy |
+| Storage | Local filesystem (dev), Supabase Storage (production) |
+| Frontend | Streamlit 1.40, Plotly, Pandas |
+| PDF | ReportLab |
 
 ---
 
-## 🔬 Technical Details
+## ML Model Performance
 
-### Computer Vision Pipeline
-
-1. **Preprocessing**
-   - Resize (max 1024px)
-   - Non-local means denoising
-   - Color space conversion (HSV, LAB)
-
-2. **Segmentation**
-   - Red hue detection (HSV: 0-10°, 170-180°)
-   - LAB a* channel thresholding
-   - Morphological operations (closing, opening)
-   - Largest contour selection
-
-3. **Feature Extraction**
-   - Aspect ratio (length/width)
-   - Circularity: 4π×Area/Perimeter²
-   - Solidity: Area/ConvexHullArea
-   - Edge smoothness (polygon approximation)
-   - Straight edge detection (segment analysis)
-   - Suture detection (blue/dark color ranges)
-
-4. **Classification**
-   - Primary: EfficientNet-B0 ML model (91.5% accuracy, 0.989 AUC) trained on 7 wound classes
-   - Fallback: Multi-factor heuristic decision tree (used when ML confidence < 60%)
-   - API response includes `classified_by`, `ml_confidence`, and per-class `confidence_scores`
-
-### LLM Integration
-
-- **Primary**: Groq (llama-3.1-8b-instant)
-- **Fallback**: Google Gemini
-- **Prompt Engineering**: Medical context, previous scan comparison
-- **Output**: Risk level, patient summary, care recommendations
-
----
-
-## 📊 Wound Classification
-
-### ML Model Performance (Test Set, 375 samples)
+EfficientNet-B0 fine-tuned on 7 wound classes, evaluated on 375 held-out samples.
 
 | Wound Type | Precision | Recall | F1 |
-|------------|-----------|--------|----|
+|---|---|---|---|
 | Surgical Incision | 0.98 | 0.83 | 0.90 |
 | Laceration | 1.00 | 0.94 | 0.97 |
 | Burn | 0.90 | 0.95 | 0.93 |
@@ -147,85 +76,85 @@ streamlit run app.py
 | Venous Ulcer | 0.92 | 0.97 | 0.95 |
 | **Overall** | **0.93** | **0.93** | **0.93** |
 
-Overall accuracy: 91.5% — Macro AUC: 0.989
+Overall accuracy: **91.5%** — Macro AUC: **0.989**
 
-### Heuristic Fallback Rules
-
-| Wound Type | Key Features | Measurement |
-|------------|--------------|-------------|
-| **Surgical Incision** | Aspect ≥1.5, straight edges, high smoothness | Length × Width |
-| **Laceration** | Aspect ≥3.0, rough edges | Length × Width |
-| **Burn** | Irregular shape, aspect <2.0 | Area |
-| **Pressure Ulcer** | Large (>15cm²), irregular, low solidity | Area |
-| **Diabetic Ulcer** | Medium size, circular (>0.65) | Area |
-| **Abrasion** | Shallow, irregular | Area |
-| **Venous Ulcer** | Default fallback | Area |
+The model classifies wound *type*. Wound region *segmentation* is done by the OpenCV pipeline, not a trained segmentation model.
 
 ---
 
-## 🛠️ Tech Stack
+## Quick Start
 
-**Backend:**
-- FastAPI 0.115.0
-- OpenCV 4.10.0
-- SQLAlchemy 2.0.36
-- Groq SDK 0.13.0
-- Google Generative AI 0.8.3
-- PyTorch + timm (EfficientNet-B0 inference)
+**Prerequisites:** Python 3.11+, a Groq API key (free at console.groq.com)
 
-**Frontend:**
-- Streamlit 1.40.0
-- Plotly 5.24.1
-- Pandas 2.2.3
+```bash
+git clone https://github.com/Msundara19/meditrack-v2.git
+cd meditrack-v2
+```
 
-**Database:**
-- SQLite (development)
-- PostgreSQL-ready (production)
+**Backend**
+```bash
+cd backend
+pip install -r requirements.txt
+cp .env.example .env        # add your GROQ_API_KEY
+python -m app.main
+# API running at http://localhost:8000
+# Docs at http://localhost:8000/docs
+```
 
----
-
-
-
----
-
-## ⚠️ Disclaimer
-
-**FOR EDUCATIONAL PURPOSES ONLY**
-
-This is a demonstration project and should **NOT** be used for:
-- Medical diagnosis
-- Treatment decisions
-- Clinical care
-
-Always consult qualified healthcare professionals for medical advice.
-
----
-
-
-
-## 🤝 Contributing
-
-Contributions welcome! Please open an issue or submit a pull request.
-
----
-
-## 📧 Contact
-
-- **Developer**: Meenakshi Sridharan Sundaram
-- **GitHub**: [@Msundara19](https://github.com/Msundara19)
-- **Email**: msridharansundaram@hawk.illinoistech.edu
-
----
-
-## 🙏 Acknowledgments
-
-- Anthropic Claude for development assistance
-- OpenCV community
-- Groq & Google for LLM APIs
-
----
-
-**⭐ Star this repo if you find it helpful!**
+**Frontend** (new terminal)
+```bash
+cd frontend
+pip install -r requirements.txt
+streamlit run app.py
+# UI at http://localhost:8501
 ```
 
 ---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `GROQ_API_KEY` | Yes | Groq API key for LLM summaries |
+| `GEMINI_API_KEY` | No | Google Gemini fallback (optional) |
+| `DATABASE_URL` | No | PostgreSQL URL for production (defaults to SQLite) |
+| `SUPABASE_URL` | No | Supabase project URL for image storage |
+| `SUPABASE_KEY` | No | Supabase anon key |
+| `SUPABASE_BUCKET` | No | Storage bucket name (default: `wound-images`) |
+
+Without `SUPABASE_URL`/`SUPABASE_KEY`, images are stored locally. Without `DATABASE_URL`, SQLite is used. Both fall back automatically — no config needed for local development.
+
+---
+
+## Production Deployment
+
+Target stack for demo deployment: **Railway** (FastAPI) + **Supabase** (PostgreSQL + Storage) + **Streamlit Cloud** (frontend).
+
+1. Create a Supabase project — copy the PostgreSQL URI and API keys
+2. Create a public storage bucket named `wound-images`
+3. Deploy the `backend/` directory on Railway with the env vars above
+4. Deploy `frontend/app.py` on Streamlit Cloud, set `BACKEND_URL` to the Railway URL
+
+---
+
+## Honest Limitations
+
+- **Not a medical device.** Not FDA-cleared. Not validated on clinical data. For educational demonstration only.
+- **Segmentation is heuristic.** The OpenCV pipeline works on well-lit, isolated wound photos. Complex backgrounds or poor lighting can cause over- or under-segmentation.
+- **Measurements depend on calibration.** Pixel-to-cm conversion uses a user-selected distance estimate — not a calibration sticker or depth sensor. Measurements are approximate.
+- **Single-wound assumption.** Comparison across scans assumes the patient is photographing the same wound. The system gates comparisons by wound type and recency but cannot verify they are the same physical wound.
+- **LLM summaries are not medical advice.** The Groq/Gemini output is generated text. It can be wrong.
+
+---
+
+## Disclaimer
+
+This project is for educational and portfolio purposes only. It must not be used for medical diagnosis, treatment decisions, or clinical care. Always consult a qualified healthcare professional.
+
+---
+
+## Contact
+
+**Meenakshi Sridharan Sundaram**
+GitHub: [@Msundara19](https://github.com/Msundara19)
+Email: msridharansundaram@hawk.illinoistech.edu
