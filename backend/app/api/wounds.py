@@ -16,6 +16,7 @@ from app.database import get_db
 from app.services.cv_service import WoundAnalyzer, validate_image
 from app.services.llm_service import get_llm_analyzer
 from app.services.report_service import generate_scan_report
+from app.services.storage_service import upload_image, upload_annotated_image, get_image_url, is_cloud_storage
 from app import schemas, models
 from app.config import settings
 
@@ -83,21 +84,22 @@ async def analyze_wound(
             ),
         )
 
-    # ── 4. Save file ──────────────────────────────────────────────────────────
+    # ── 4. Save file (local dev) or upload to Supabase (production) ──────────
     scan_id = str(uuid.uuid4())
-    upload_dir = Path(settings.UPLOAD_DIR)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
     file_extension = Path(file.filename or "wound.jpg").suffix or ".jpg"
-    image_path = upload_dir / f"{scan_id}{file_extension}"
+    original_filename = f"{scan_id}{file_extension}"
+
+    # Always write to a temp local path for CV analysis (OpenCV needs a file path)
+    import tempfile, os
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
+    tmp_path = tmp_file.name
+    tmp_file.write(content)
+    tmp_file.close()
 
     try:
-        image_path.write_bytes(content)
-        logger.info(f"Saved uploaded image: {image_path}")
-
         # ── 5. Basic image validation (size / readability) ────────────────────
-        if not validate_image(str(image_path)):
-            image_path.unlink(missing_ok=True)
+        if not validate_image(tmp_path):
+            os.unlink(tmp_path)
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -108,19 +110,25 @@ async def analyze_wound(
 
         # ── 6. CV analysis ────────────────────────────────────────────────────
         try:
-            cv_metrics = wound_analyzer.analyze_wound(str(image_path), calibration_factor=calibration_factor)
+            cv_metrics = wound_analyzer.analyze_wound(tmp_path, calibration_factor=calibration_factor)
         except ValueError as e:
-            image_path.unlink(missing_ok=True)
+            os.unlink(tmp_path)
             raise HTTPException(status_code=422, detail=str(e))
         except Exception as e:
             logger.error(f"CV analysis failed: {e}")
-            image_path.unlink(missing_ok=True)
+            os.unlink(tmp_path)
             raise HTTPException(status_code=500, detail=f"Computer vision analysis failed: {e}")
-        
-        # Save annotated image
-        annotated_filename = f"{scan_id}_annotated{file_extension}"
-        annotated_path = upload_dir / annotated_filename
-        wound_analyzer.save_annotated_image(cv_metrics.annotated_image, str(annotated_path))
+
+        # ── 7. Persist images (local or Supabase) ─────────────────────────────
+        stored_image_path = upload_image(content, original_filename, scan_id)
+        logger.info(f"Stored original image: {stored_image_path}")
+
+        import cv2
+        _, ann_buffer = cv2.imencode(".jpg", cv_metrics.annotated_image)
+        stored_annotated_path = upload_image(ann_buffer.tobytes(), f"{scan_id}_annotated{file_extension}", scan_id)
+        logger.info(f"Stored annotated image: {stored_annotated_path}")
+
+        os.unlink(tmp_path)
         
         # Get previous scan for comparison — only valid if:
         # 1. Same wound type (comparing an abrasion to a pressure ulcer is meaningless)
@@ -192,7 +200,8 @@ async def analyze_wound(
         scan = schemas.WoundScan(
             id=scan_id,
             patient_id=patient_id,
-            image_path=str(image_path),
+            image_path=stored_image_path,
+            annotated_image_path=stored_annotated_path,
             scan_date=datetime.utcnow(),
             wound_area_pixels=cv_metrics.wound_area_pixels,
             wound_area_cm2=cv_metrics.wound_area_cm2,
@@ -246,17 +255,16 @@ async def analyze_wound(
                 summary=llm_result["summary"],
                 recommendations=llm_result["recommendations"]
             ),
-            image_url=f"/api/wounds/{scan_id}/image",
-            annotated_image_url=f"/api/wounds/{scan_id}/annotated"
+            image_url=get_image_url(scan_id, stored_image_path, "original"),
+            annotated_image_url=get_image_url(scan_id, stored_annotated_path, "annotated"),
         )
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error during analysis: {e}")
-        # Cleanup uploaded file
-        if image_path.exists():
-            image_path.unlink()
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
         raise HTTPException(
             status_code=500,
             detail=f"Analysis failed: {str(e)}"
@@ -408,9 +416,12 @@ async def delete_scan(
 @router.get("/{scan_id}/image")
 async def get_scan_image(scan_id: str, db: Session = Depends(get_db)):
     """Serve the original wound image for a scan."""
+    from fastapi.responses import RedirectResponse
     scan = db.query(schemas.WoundScan).filter(schemas.WoundScan.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+    if is_cloud_storage():
+        return RedirectResponse(url=scan.image_path)
     image_path = Path(scan.image_path)
     if not image_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found")
@@ -420,13 +431,16 @@ async def get_scan_image(scan_id: str, db: Session = Depends(get_db)):
 @router.get("/{scan_id}/annotated")
 async def get_annotated_image(scan_id: str, db: Session = Depends(get_db)):
     """Serve the annotated wound image for a scan."""
+    from fastapi.responses import RedirectResponse
     scan = db.query(schemas.WoundScan).filter(schemas.WoundScan.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
-    image_path = Path(scan.image_path)
-    annotated_path = image_path.parent / f"{scan_id}_annotated{image_path.suffix}"
+    annotated = scan.annotated_image_path or scan.image_path
+    if is_cloud_storage():
+        return RedirectResponse(url=annotated)
+    annotated_path = Path(annotated)
     if not annotated_path.exists():
-        # Fall back to original if annotated not found
+        image_path = Path(scan.image_path)
         if not image_path.exists():
             raise HTTPException(status_code=404, detail="Image file not found")
         return FileResponse(str(image_path), media_type="image/jpeg")
