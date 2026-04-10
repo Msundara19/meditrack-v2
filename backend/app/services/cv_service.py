@@ -232,6 +232,13 @@ class WoundAnalyzer:
         h_img, w_img = image.shape[:2]
         total_pixels = h_img * w_img
 
+        # Center-bias mask: ignore outer 15% of image on each side.
+        # Wounds are almost always centered in a photo; background clutter lives at edges.
+        margin_y = int(h_img * 0.15)
+        margin_x = int(w_img * 0.15)
+        center_mask = np.zeros((h_img, w_img), dtype=np.uint8)
+        center_mask[margin_y:h_img - margin_y, margin_x:w_img - margin_x] = 255
+
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
 
@@ -256,8 +263,9 @@ class WoundAnalyzer:
         lab_thresh = max(threshold_pct, 135.0)
         mask_lab = (a_channel >= lab_thresh).astype(np.uint8) * 255
 
-        # --- Combine & morphological cleanup ---
+        # --- Combine, apply center bias, morphological cleanup ---
         combined = cv2.bitwise_or(mask_hsv, mask_lab)
+        combined = cv2.bitwise_and(combined, center_mask)  # restrict to center region
 
         kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel_close)
