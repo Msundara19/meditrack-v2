@@ -262,7 +262,8 @@ async def analyze_wound(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error during analysis: {e}")
+        import traceback
+        logger.error(f"Unexpected error during analysis: {e}\n{traceback.format_exc()}")
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
         raise HTTPException(
