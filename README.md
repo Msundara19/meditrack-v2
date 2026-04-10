@@ -2,6 +2,8 @@
 
 **Patient-First Wound Monitoring — AI-Powered Analysis Between Clinic Visits**
 
+<img width="1084" height="914" alt="image" src="https://github.com/user-attachments/assets/9dce61ab-c851-4633-bd29-17880b1f2c35" />
+
 > **Live Demo:** [meditrack-v2.streamlit.app](https://meditrack-v2.streamlit.app)
 
 MediTrack is a portfolio/educational project that lets patients photograph a wound, get a plain-English explanation of how it is healing, and track progress over time. It is built for the gap between clinic visits — not as a clinical documentation tool.
