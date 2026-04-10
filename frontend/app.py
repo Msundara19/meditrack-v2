@@ -42,6 +42,12 @@ section[data-testid="stMain"] > div:first-child > div {
     max-width: 1100px !important;
     width: 100% !important;
 }
+[data-testid="stMainBlockContainer"] {
+    max-width: 1100px !important;
+    margin: 0 auto !important;
+    padding-left: 3rem !important;
+    padding-right: 3rem !important;
+}
 
 /* ── Nav bar ── */
 .nav {
