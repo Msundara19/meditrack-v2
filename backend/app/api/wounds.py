@@ -196,29 +196,29 @@ async def analyze_wound(
             db.add(patient)
             logger.info(f"Created new patient: {patient_id}")
         
-        # Save scan to database with classification data
+        # Save scan to database — cast NumPy scalars to native Python types
+        # PostgreSQL rejects np.float64/np.int64 values directly
         scan = schemas.WoundScan(
             id=scan_id,
             patient_id=patient_id,
             image_path=stored_image_path,
             annotated_image_path=stored_annotated_path,
             scan_date=datetime.utcnow(),
-            wound_area_pixels=cv_metrics.wound_area_pixels,
-            wound_area_cm2=cv_metrics.wound_area_cm2,
-            redness_index=cv_metrics.redness_index,
-            edge_sharpness=cv_metrics.edge_sharpness,
-            healing_score=cv_metrics.healing_score,
+            wound_area_pixels=int(cv_metrics.wound_area_pixels),
+            wound_area_cm2=float(cv_metrics.wound_area_cm2),
+            redness_index=float(cv_metrics.redness_index),
+            edge_sharpness=float(cv_metrics.edge_sharpness),
+            healing_score=float(cv_metrics.healing_score),
             risk_level=llm_result["risk_level"],
             llm_summary=llm_result["summary"],
             recommendations=llm_result["recommendations"],
-            calibration_factor=settings.DEFAULT_CALIBRATION_FACTOR,
-            # Classification fields
+            calibration_factor=float(settings.DEFAULT_CALIBRATION_FACTOR),
             wound_type=cv_metrics.wound_type,
-            length_cm=cv_metrics.wound_features.length_cm if cv_metrics.wound_features else None,
-            width_cm=cv_metrics.wound_features.width_cm if cv_metrics.wound_features else None,
-            aspect_ratio=cv_metrics.wound_features.aspect_ratio if cv_metrics.wound_features else None,
-            circularity=cv_metrics.wound_features.circularity if cv_metrics.wound_features else None,
-            solidity=cv_metrics.wound_features.solidity if cv_metrics.wound_features else None,
+            length_cm=float(cv_metrics.wound_features.length_cm) if cv_metrics.wound_features else None,
+            width_cm=float(cv_metrics.wound_features.width_cm) if cv_metrics.wound_features else None,
+            aspect_ratio=float(cv_metrics.wound_features.aspect_ratio) if cv_metrics.wound_features else None,
+            circularity=float(cv_metrics.wound_features.circularity) if cv_metrics.wound_features else None,
+            solidity=float(cv_metrics.wound_features.solidity) if cv_metrics.wound_features else None,
             image_hash=image_hash,
         )
         
