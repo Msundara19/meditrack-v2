@@ -9,7 +9,8 @@ import io
 import plotly.graph_objects as go
 import pandas as pd
 
-API_URL = "http://localhost:8000"
+import os
+API_URL = st.secrets.get("BACKEND_URL", os.getenv("BACKEND_URL", "http://localhost:8000"))
 
 st.set_page_config(
     page_title="MediTrack — Wound Monitoring AI",
